@@ -1,0 +1,316 @@
+; Pixel test shader for tests/math_gpu.mm: the GLSL.std.450 math and geometric instructions added in batch 1 on the
+; fast (graphics) path. Pixel (x, y) shows case x for input row y: a, b, c = the vec4s at rows[3 * y .. 3 * y + 2] of
+; the uniform block at set 1 binding 0. Cases 0-16: the 17 math instructions on the vec4s (Round Tan Asin Acos Atan
+; Atan2 Sinh Cosh Tanh Asinh Acosh Atanh Radians Degrees FMix Step SmoothStep); 17-21: the same on the scalars a.x, b.x,
+; c.x, four to a pixel; 22-39: Length Distance Normalize FaceForward Reflect Refract (eta = c.x) on the vec2, vec3 and
+; vec4 truncations of a, b, c; 40: Cross. Narrower results are padded with zeros.
+OpCapability Shader
+%glsl = OpExtInstImport "GLSL.std.450"
+OpMemoryModel Logical GLSL450
+OpEntryPoint Fragment %main "main" %out %fragcoord
+OpExecutionMode %main OriginUpperLeft
+OpDecorate %out Location 0
+OpDecorate %fragcoord BuiltIn FragCoord
+OpDecorate %rows ArrayStride 16
+OpMemberDecorate %Block 0 Offset 0
+OpDecorate %Block Block
+OpDecorate %ubo DescriptorSet 1
+OpDecorate %ubo Binding 0
+%void = OpTypeVoid
+%fn = OpTypeFunction %void
+%u = OpTypeInt 32 0
+%i = OpTypeInt 32 1
+%f = OpTypeFloat 32
+%v2 = OpTypeVector %f 2
+%v3 = OpTypeVector %f 3
+%v4 = OpTypeVector %f 4
+%u3 = OpTypeVector %u 3
+%f0 = OpConstant %f 0
+%ci0 = OpConstant %i 0
+%ci1 = OpConstant %i 1
+%ci2 = OpConstant %i 2
+%ci3 = OpConstant %i 3
+%cr = OpConstant %u 192
+%rows = OpTypeArray %v4 %cr
+%Block = OpTypeStruct %rows
+%pb = OpTypePointer Uniform %Block
+%pu4 = OpTypePointer Uniform %v4
+%po4 = OpTypePointer Output %v4
+%pi4 = OpTypePointer Input %v4
+%ubo = OpVariable %pb Uniform
+%out = OpVariable %po4 Output
+%fragcoord = OpVariable %pi4 Input
+%zero4 = OpConstantComposite %v4 %f0 %f0 %f0 %f0
+%main = OpFunction %void None %fn
+%entry = OpLabel
+%t1 = OpLoad %v4 %fragcoord
+%t2 = OpCompositeExtract %f %t1 0
+%t3 = OpCompositeExtract %f %t1 1
+%t4 = OpConvertFToS %i %t2
+%t5 = OpConvertFToS %i %t3
+%t6 = OpIMul %i %t5 %ci3
+%t7 = OpIAdd %i %t6 %ci0
+%t8 = OpAccessChain %pu4 %ubo %ci0 %t7
+%t9 = OpLoad %v4 %t8
+%t10 = OpIAdd %i %t6 %ci1
+%t11 = OpAccessChain %pu4 %ubo %ci0 %t10
+%t12 = OpLoad %v4 %t11
+%t13 = OpIAdd %i %t6 %ci2
+%t14 = OpAccessChain %pu4 %ubo %ci0 %t13
+%t15 = OpLoad %v4 %t14
+%t16 = OpCompositeExtract %f %t9 0
+%t17 = OpCompositeExtract %f %t12 0
+%t18 = OpCompositeExtract %f %t15 0
+%t19 = OpVectorShuffle %v2 %t9 %t9 0 1
+%t20 = OpVectorShuffle %v2 %t12 %t12 0 1
+%t21 = OpVectorShuffle %v2 %t15 %t15 0 1
+%t22 = OpVectorShuffle %v3 %t9 %t9 0 1 2
+%t23 = OpVectorShuffle %v3 %t12 %t12 0 1 2
+%t24 = OpVectorShuffle %v3 %t15 %t15 0 1 2
+OpSelectionMerge %merge None
+OpSwitch %t4 %dflt 0 %case0 1 %case1 2 %case2 3 %case3 4 %case4 5 %case5 6 %case6 7 %case7 8 %case8 9 %case9 10 %case10 11 %case11 12 %case12 13 %case13 14 %case14 15 %case15 16 %case16 17 %case17 18 %case18 19 %case19 20 %case20 21 %case21 22 %case22 23 %case23 24 %case24 25 %case25 26 %case26 27 %case27 28 %case28 29 %case29 30 %case30 31 %case31 32 %case32 33 %case33 34 %case34 35 %case35 36 %case36 37 %case37 38 %case38 39 %case39 40 %case40
+%case0 = OpLabel
+%t25 = OpExtInst %v4 %glsl Round %t9
+OpStore %out %t25
+OpBranch %merge
+%case1 = OpLabel
+%t26 = OpExtInst %v4 %glsl Tan %t9
+OpStore %out %t26
+OpBranch %merge
+%case2 = OpLabel
+%t27 = OpExtInst %v4 %glsl Asin %t9
+OpStore %out %t27
+OpBranch %merge
+%case3 = OpLabel
+%t28 = OpExtInst %v4 %glsl Acos %t9
+OpStore %out %t28
+OpBranch %merge
+%case4 = OpLabel
+%t29 = OpExtInst %v4 %glsl Atan %t9
+OpStore %out %t29
+OpBranch %merge
+%case5 = OpLabel
+%t30 = OpExtInst %v4 %glsl Atan2 %t9 %t12
+OpStore %out %t30
+OpBranch %merge
+%case6 = OpLabel
+%t31 = OpExtInst %v4 %glsl Sinh %t9
+OpStore %out %t31
+OpBranch %merge
+%case7 = OpLabel
+%t32 = OpExtInst %v4 %glsl Cosh %t9
+OpStore %out %t32
+OpBranch %merge
+%case8 = OpLabel
+%t33 = OpExtInst %v4 %glsl Tanh %t9
+OpStore %out %t33
+OpBranch %merge
+%case9 = OpLabel
+%t34 = OpExtInst %v4 %glsl Asinh %t9
+OpStore %out %t34
+OpBranch %merge
+%case10 = OpLabel
+%t35 = OpExtInst %v4 %glsl Acosh %t9
+OpStore %out %t35
+OpBranch %merge
+%case11 = OpLabel
+%t36 = OpExtInst %v4 %glsl Atanh %t9
+OpStore %out %t36
+OpBranch %merge
+%case12 = OpLabel
+%t37 = OpExtInst %v4 %glsl Radians %t9
+OpStore %out %t37
+OpBranch %merge
+%case13 = OpLabel
+%t38 = OpExtInst %v4 %glsl Degrees %t9
+OpStore %out %t38
+OpBranch %merge
+%case14 = OpLabel
+%t39 = OpExtInst %v4 %glsl FMix %t9 %t12 %t15
+OpStore %out %t39
+OpBranch %merge
+%case15 = OpLabel
+%t40 = OpExtInst %v4 %glsl Step %t9 %t12
+OpStore %out %t40
+OpBranch %merge
+%case16 = OpLabel
+%t41 = OpExtInst %v4 %glsl SmoothStep %t9 %t12 %t15
+OpStore %out %t41
+OpBranch %merge
+%case17 = OpLabel
+%t42 = OpExtInst %f %glsl Round %t16
+%t43 = OpExtInst %f %glsl Tan %t16
+%t44 = OpExtInst %f %glsl Asin %t16
+%t45 = OpExtInst %f %glsl Acos %t16
+%t46 = OpCompositeConstruct %v4 %t42 %t43 %t44 %t45
+OpStore %out %t46
+OpBranch %merge
+%case18 = OpLabel
+%t47 = OpExtInst %f %glsl Atan %t16
+%t48 = OpExtInst %f %glsl Atan2 %t16 %t17
+%t49 = OpExtInst %f %glsl Sinh %t16
+%t50 = OpExtInst %f %glsl Cosh %t16
+%t51 = OpCompositeConstruct %v4 %t47 %t48 %t49 %t50
+OpStore %out %t51
+OpBranch %merge
+%case19 = OpLabel
+%t52 = OpExtInst %f %glsl Tanh %t16
+%t53 = OpExtInst %f %glsl Asinh %t16
+%t54 = OpExtInst %f %glsl Acosh %t16
+%t55 = OpExtInst %f %glsl Atanh %t16
+%t56 = OpCompositeConstruct %v4 %t52 %t53 %t54 %t55
+OpStore %out %t56
+OpBranch %merge
+%case20 = OpLabel
+%t57 = OpExtInst %f %glsl Radians %t16
+%t58 = OpExtInst %f %glsl Degrees %t16
+%t59 = OpExtInst %f %glsl FMix %t16 %t17 %t18
+%t60 = OpExtInst %f %glsl Step %t16 %t17
+%t61 = OpCompositeConstruct %v4 %t57 %t58 %t59 %t60
+OpStore %out %t61
+OpBranch %merge
+%case21 = OpLabel
+%t62 = OpExtInst %f %glsl SmoothStep %t16 %t17 %t18
+%t63 = OpCompositeConstruct %v4 %t62 %f0 %f0 %f0
+OpStore %out %t63
+OpBranch %merge
+%case22 = OpLabel
+%t64 = OpExtInst %f %glsl Length %t19
+%t65 = OpCompositeConstruct %v4 %t64 %f0 %f0 %f0
+OpStore %out %t65
+OpBranch %merge
+%case23 = OpLabel
+%t66 = OpExtInst %f %glsl Distance %t19 %t20
+%t67 = OpCompositeConstruct %v4 %t66 %f0 %f0 %f0
+OpStore %out %t67
+OpBranch %merge
+%case24 = OpLabel
+%t68 = OpExtInst %v2 %glsl Normalize %t19
+%t69 = OpCompositeExtract %f %t68 0
+%t70 = OpCompositeExtract %f %t68 1
+%t71 = OpCompositeConstruct %v4 %t69 %t70 %f0 %f0
+OpStore %out %t71
+OpBranch %merge
+%case25 = OpLabel
+%t72 = OpExtInst %v2 %glsl FaceForward %t19 %t20 %t21
+%t73 = OpCompositeExtract %f %t72 0
+%t74 = OpCompositeExtract %f %t72 1
+%t75 = OpCompositeConstruct %v4 %t73 %t74 %f0 %f0
+OpStore %out %t75
+OpBranch %merge
+%case26 = OpLabel
+%t76 = OpExtInst %v2 %glsl Reflect %t19 %t20
+%t77 = OpCompositeExtract %f %t76 0
+%t78 = OpCompositeExtract %f %t76 1
+%t79 = OpCompositeConstruct %v4 %t77 %t78 %f0 %f0
+OpStore %out %t79
+OpBranch %merge
+%case27 = OpLabel
+%t80 = OpExtInst %v2 %glsl Refract %t19 %t20 %t18
+%t81 = OpCompositeExtract %f %t80 0
+%t82 = OpCompositeExtract %f %t80 1
+%t83 = OpCompositeConstruct %v4 %t81 %t82 %f0 %f0
+OpStore %out %t83
+OpBranch %merge
+%case28 = OpLabel
+%t84 = OpExtInst %f %glsl Length %t22
+%t85 = OpCompositeConstruct %v4 %t84 %f0 %f0 %f0
+OpStore %out %t85
+OpBranch %merge
+%case29 = OpLabel
+%t86 = OpExtInst %f %glsl Distance %t22 %t23
+%t87 = OpCompositeConstruct %v4 %t86 %f0 %f0 %f0
+OpStore %out %t87
+OpBranch %merge
+%case30 = OpLabel
+%t88 = OpExtInst %v3 %glsl Normalize %t22
+%t89 = OpCompositeExtract %f %t88 0
+%t90 = OpCompositeExtract %f %t88 1
+%t91 = OpCompositeExtract %f %t88 2
+%t92 = OpCompositeConstruct %v4 %t89 %t90 %t91 %f0
+OpStore %out %t92
+OpBranch %merge
+%case31 = OpLabel
+%t93 = OpExtInst %v3 %glsl FaceForward %t22 %t23 %t24
+%t94 = OpCompositeExtract %f %t93 0
+%t95 = OpCompositeExtract %f %t93 1
+%t96 = OpCompositeExtract %f %t93 2
+%t97 = OpCompositeConstruct %v4 %t94 %t95 %t96 %f0
+OpStore %out %t97
+OpBranch %merge
+%case32 = OpLabel
+%t98 = OpExtInst %v3 %glsl Reflect %t22 %t23
+%t99 = OpCompositeExtract %f %t98 0
+%t100 = OpCompositeExtract %f %t98 1
+%t101 = OpCompositeExtract %f %t98 2
+%t102 = OpCompositeConstruct %v4 %t99 %t100 %t101 %f0
+OpStore %out %t102
+OpBranch %merge
+%case33 = OpLabel
+%t103 = OpExtInst %v3 %glsl Refract %t22 %t23 %t18
+%t104 = OpCompositeExtract %f %t103 0
+%t105 = OpCompositeExtract %f %t103 1
+%t106 = OpCompositeExtract %f %t103 2
+%t107 = OpCompositeConstruct %v4 %t104 %t105 %t106 %f0
+OpStore %out %t107
+OpBranch %merge
+%case34 = OpLabel
+%t108 = OpExtInst %f %glsl Length %t9
+%t109 = OpCompositeConstruct %v4 %t108 %f0 %f0 %f0
+OpStore %out %t109
+OpBranch %merge
+%case35 = OpLabel
+%t110 = OpExtInst %f %glsl Distance %t9 %t12
+%t111 = OpCompositeConstruct %v4 %t110 %f0 %f0 %f0
+OpStore %out %t111
+OpBranch %merge
+%case36 = OpLabel
+%t112 = OpExtInst %v4 %glsl Normalize %t9
+%t113 = OpCompositeExtract %f %t112 0
+%t114 = OpCompositeExtract %f %t112 1
+%t115 = OpCompositeExtract %f %t112 2
+%t116 = OpCompositeExtract %f %t112 3
+%t117 = OpCompositeConstruct %v4 %t113 %t114 %t115 %t116
+OpStore %out %t117
+OpBranch %merge
+%case37 = OpLabel
+%t118 = OpExtInst %v4 %glsl FaceForward %t9 %t12 %t15
+%t119 = OpCompositeExtract %f %t118 0
+%t120 = OpCompositeExtract %f %t118 1
+%t121 = OpCompositeExtract %f %t118 2
+%t122 = OpCompositeExtract %f %t118 3
+%t123 = OpCompositeConstruct %v4 %t119 %t120 %t121 %t122
+OpStore %out %t123
+OpBranch %merge
+%case38 = OpLabel
+%t124 = OpExtInst %v4 %glsl Reflect %t9 %t12
+%t125 = OpCompositeExtract %f %t124 0
+%t126 = OpCompositeExtract %f %t124 1
+%t127 = OpCompositeExtract %f %t124 2
+%t128 = OpCompositeExtract %f %t124 3
+%t129 = OpCompositeConstruct %v4 %t125 %t126 %t127 %t128
+OpStore %out %t129
+OpBranch %merge
+%case39 = OpLabel
+%t130 = OpExtInst %v4 %glsl Refract %t9 %t12 %t18
+%t131 = OpCompositeExtract %f %t130 0
+%t132 = OpCompositeExtract %f %t130 1
+%t133 = OpCompositeExtract %f %t130 2
+%t134 = OpCompositeExtract %f %t130 3
+%t135 = OpCompositeConstruct %v4 %t131 %t132 %t133 %t134
+OpStore %out %t135
+OpBranch %merge
+%case40 = OpLabel
+%t136 = OpExtInst %v3 %glsl Cross %t22 %t23
+%t137 = OpCompositeExtract %f %t136 0
+%t138 = OpCompositeExtract %f %t136 1
+%t139 = OpCompositeExtract %f %t136 2
+%t140 = OpCompositeConstruct %v4 %t137 %t138 %t139 %f0
+OpStore %out %t140
+OpBranch %merge
+%dflt = OpLabel
+OpStore %out %zero4
+OpBranch %merge
+%merge = OpLabel
+OpReturn
+OpFunctionEnd

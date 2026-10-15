@@ -1,0 +1,11 @@
+# Metallib container output
+
+The container writer serializes little-endian fields. Its 0x58-byte header begins with `MTLB`, followed by target/version fields, total size and offset/size pairs for the function list, public metadata, private metadata and bitcode. Defaults select macOS 14, executable-library type, file version 2.7. `mtlb::make_target(Platform, min_os)` builds the header for macOS, iOS or iOS Simulator (platform field `0x0001` without macOS's bit 15; OS byte `0x82` iOS, `0x87` Simulator); see the platform table in air.md.
+
+A function-list section starts with a uint32 count. Each function record has a uint32 record size followed by tags. Most tags consist of four ASCII bytes, a uint16 payload length and payload bytes. `ENDT` is a four-byte terminator without a length. The writer emits `NAME`, `TYPE`, `HASH`, `MDSZ`, `OFFT` and `VERS`, plus `TESS` when requested. Names are NUL terminated; `HASH` is the SHA-256 digest of that function's wrapped bitcode; `MDSZ` is its bitcode size. `OFFT` supplies per-function offsets into metadata and bitcode sections. `VERS` holds AIR and language versions. `TESS` encodes triangle/quad domain and control-point count.
+
+Public/private metadata contain a length prefix and terminated tags for each function. Public metadata can include function constants (`CNST`; see air.md, Function constants) and vertex attribute names/types (`VATT`, `VATY`). The bitcode section concatenates one wrapped module per function. The writer emits an empty header extension and empty private metadata.
+
+Call `mtlb::library_size` to allocate output, then `mtlb::write`. `prefix_size` gives the first bitcode byte for callers who write bitcode directly into the destination before writing the container prefix. Precomputed hashes must describe the actual bytes; the default computes them with CommonCrypto. Input pointers, metadata counts, string lengths and destination size are caller responsibilities.
+
+CPU tests generate containers from hand-built kernels, parse the implemented tag set, rebuild the container, and compare every byte, including the in-place writing path. These tests contain no precompiled reference libraries. Driver loading and pipeline creation are validated separately by GPU tests.

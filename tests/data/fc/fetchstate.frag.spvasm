@@ -1,0 +1,56 @@
+; Pixel test shader for tests/fc_gpu.mm: xenia-style "fetch state" uniforms, set 9, each a block holding one uint4 that
+; the host supplies as a Metal function constant (Options::graphics.functionConstantSet = 9).
+;   out = float4(fs0.x, fs0.w, fs3.z, fs7.y)
+; fs0 is read through an access chain to member 0 and a whole-uint4 load, fs3 through a chain to member 0 and
+; component 2 (a scalar load), fs7 through a load of the whole block and an OpCompositeExtract.
+               OpCapability Shader
+               OpMemoryModel Logical GLSL450
+               OpEntryPoint Fragment %main "main" %out
+               OpExecutionMode %main OriginUpperLeft
+               OpDecorate %out Location 0
+               OpMemberDecorate %XeFetchState 0 Offset 0
+               OpDecorate %XeFetchState Block
+               OpDecorate %fs0 DescriptorSet 9
+               OpDecorate %fs0 Binding 0
+               OpDecorate %fs3 DescriptorSet 9
+               OpDecorate %fs3 Binding 3
+               OpDecorate %fs7 DescriptorSet 9
+               OpDecorate %fs7 Binding 7
+       %void = OpTypeVoid
+       %fnty = OpTypeFunction %void
+      %float = OpTypeFloat 32
+       %uint = OpTypeInt 32 0
+        %int = OpTypeInt 32 1
+         %v4 = OpTypeVector %float 4
+      %v4uint = OpTypeVector %uint 4
+       %int0 = OpConstant %int 0
+       %int2 = OpConstant %int 2
+       %int3 = OpConstant %int 3
+%XeFetchState = OpTypeStruct %v4uint
+ %p_un_blk = OpTypePointer Uniform %XeFetchState
+ %p_un_v4u = OpTypePointer Uniform %v4uint
+  %p_un_u = OpTypePointer Uniform %uint
+   %p_out_v4 = OpTypePointer Output %v4
+        %fs0 = OpVariable %p_un_blk Uniform
+        %fs3 = OpVariable %p_un_blk Uniform
+        %fs7 = OpVariable %p_un_blk Uniform
+        %out = OpVariable %p_out_v4 Output
+       %main = OpFunction %void None %fnty
+      %entry = OpLabel
+        %cp0 = OpAccessChain %p_un_v4u %fs0 %int0
+         %a = OpLoad %v4uint %cp0
+        %cp3 = OpAccessChain %p_un_u %fs3 %int0 %int2
+         %b = OpLoad %uint %cp3
+        %blk = OpLoad %XeFetchState %fs7
+         %c = OpCompositeExtract %v4uint %blk 0
+         %ax = OpCompositeExtract %uint %a 0
+         %aw = OpCompositeExtract %uint %a 3
+         %cy = OpCompositeExtract %uint %c 1
+        %fax = OpConvertUToF %float %ax
+        %faw = OpConvertUToF %float %aw
+         %fb = OpConvertUToF %float %b
+        %fcy = OpConvertUToF %float %cy
+          %r = OpCompositeConstruct %v4 %fax %faw %fb %fcy
+               OpStore %out %r
+               OpReturn
+               OpFunctionEnd

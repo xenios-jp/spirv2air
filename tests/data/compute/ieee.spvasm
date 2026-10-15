@@ -1,0 +1,116 @@
+; Compute test shader for tests/compute_gpu.mm: IEEE and wrapping-integer SPIR-V semantics.
+; For invocation g, in[4g..4g+3] = x, y (float bits), p, q (uint):
+;  out[8g+0] Fract(x)                      = x - floor(x): 1.0 for a tiny negative x, not 0x3f7fffff
+;  out[8g+1] FOrdNotEqual(x, y)            false if either is NaN
+;  out[8g+2] FUnordEqual(x, y)             true if either is NaN
+;  out[8g+3] -(INT_MIN * int(p))           OpIMul and OpSNegate wrap
+;  out[8g+4] (-1065166664 - int(p)) > 8388608   OpISub wraps
+;  out[8g+5] BitFieldSExtract(int(p), q & 31, 0) = 0 (Count 0)
+;  out[8g+6] FMin(x, y), out[8g+7] FMax(x, y)    (x, y not NaN: a NaN operand makes the result undefined)
+               OpCapability Shader
+          %glsl = OpExtInstImport "GLSL.std.450"
+               OpMemoryModel Logical GLSL450
+               OpEntryPoint GLCompute %main "main" %gid
+               OpExecutionMode %main LocalSize 64 1 1
+               OpDecorate %gid BuiltIn GlobalInvocationId
+               OpDecorate %arr ArrayStride 4
+               OpMemberDecorate %Buf 0 Offset 0
+               OpDecorate %Buf Block
+               OpDecorate %inb DescriptorSet 0
+               OpDecorate %inb Binding 0
+               OpDecorate %outb DescriptorSet 0
+               OpDecorate %outb Binding 1
+       %void = OpTypeVoid
+       %fnty = OpTypeFunction %void
+       %uint = OpTypeInt 32 0
+        %int = OpTypeInt 32 1
+      %float = OpTypeFloat 32
+       %bool = OpTypeBool
+      %uint3 = OpTypeVector %uint 3
+        %arr = OpTypeRuntimeArray %uint
+        %Buf = OpTypeStruct %arr
+         %u0 = OpConstant %uint 0
+         %u1 = OpConstant %uint 1
+         %u2 = OpConstant %uint 2
+         %u3 = OpConstant %uint 3
+         %u4 = OpConstant %uint 4
+         %u5 = OpConstant %uint 5
+         %u6 = OpConstant %uint 6
+         %u7 = OpConstant %uint 7
+         %u8 = OpConstant %uint 8
+         %u31 = OpConstant %uint 31
+    %imin = OpConstant %int -2147483648
+    %ic1 = OpConstant %int -1065166664
+    %ic2 = OpConstant %int 8388608
+  %p_sb_buf = OpTypePointer StorageBuffer %Buf
+    %p_sb_u = OpTypePointer StorageBuffer %uint
+   %p_in_u3 = OpTypePointer Input %uint3
+        %inb = OpVariable %p_sb_buf StorageBuffer
+       %outb = OpVariable %p_sb_buf StorageBuffer
+        %gid = OpVariable %p_in_u3 Input
+       %main = OpFunction %void None %fnty
+      %entry = OpLabel
+          %g = OpLoad %uint3 %gid
+         %gx = OpCompositeExtract %uint %g 0
+         %ib = OpIMul %uint %gx %u4
+         %ob = OpIMul %uint %gx %u8
+        %ix = OpIAdd %uint %ib %u0
+        %pix = OpAccessChain %p_sb_u %inb %u0 %ix
+        %wx = OpLoad %uint %pix
+        %iy = OpIAdd %uint %ib %u1
+        %piy = OpAccessChain %p_sb_u %inb %u0 %iy
+        %wy = OpLoad %uint %piy
+        %ip = OpIAdd %uint %ib %u2
+        %pip = OpAccessChain %p_sb_u %inb %u0 %ip
+        %wp = OpLoad %uint %pip
+        %iq = OpIAdd %uint %ib %u3
+        %piq = OpAccessChain %p_sb_u %inb %u0 %iq
+        %wq = OpLoad %uint %piq
+          %x = OpBitcast %float %wx
+          %y = OpBitcast %float %wy
+         %pi = OpBitcast %int %wp
+        %fr = OpExtInst %float %glsl Fract %x
+        %r0 = OpBitcast %uint %fr
+        %c1 = OpFOrdNotEqual %bool %x %y
+        %r1 = OpSelect %uint %c1 %u1 %u0
+        %c2 = OpFUnordEqual %bool %x %y
+        %r2 = OpSelect %uint %c2 %u1 %u0
+        %m3 = OpIMul %int %imin %pi
+        %n3 = OpSNegate %int %m3
+        %r3 = OpBitcast %uint %n3
+        %s4 = OpISub %int %ic1 %pi
+        %c4 = OpSGreaterThan %bool %s4 %ic2
+        %r4 = OpSelect %uint %c4 %u1 %u0
+        %qm = OpBitwiseAnd %uint %wq %u31
+        %b5 = OpBitFieldSExtract %int %pi %qm %u0
+        %r5 = OpBitcast %uint %b5
+        %mn = OpExtInst %float %glsl FMin %x %y
+        %r6 = OpBitcast %uint %mn
+        %mx = OpExtInst %float %glsl FMax %x %y
+        %r7 = OpBitcast %uint %mx
+       %oi0 = OpIAdd %uint %ob %u0
+       %po0 = OpAccessChain %p_sb_u %outb %u0 %oi0
+               OpStore %po0 %r0
+       %oi1 = OpIAdd %uint %ob %u1
+       %po1 = OpAccessChain %p_sb_u %outb %u0 %oi1
+               OpStore %po1 %r1
+       %oi2 = OpIAdd %uint %ob %u2
+       %po2 = OpAccessChain %p_sb_u %outb %u0 %oi2
+               OpStore %po2 %r2
+       %oi3 = OpIAdd %uint %ob %u3
+       %po3 = OpAccessChain %p_sb_u %outb %u0 %oi3
+               OpStore %po3 %r3
+       %oi4 = OpIAdd %uint %ob %u4
+       %po4 = OpAccessChain %p_sb_u %outb %u0 %oi4
+               OpStore %po4 %r4
+       %oi5 = OpIAdd %uint %ob %u5
+       %po5 = OpAccessChain %p_sb_u %outb %u0 %oi5
+               OpStore %po5 %r5
+       %oi6 = OpIAdd %uint %ob %u6
+       %po6 = OpAccessChain %p_sb_u %outb %u0 %oi6
+               OpStore %po6 %r6
+       %oi7 = OpIAdd %uint %ob %u7
+       %po7 = OpAccessChain %p_sb_u %outb %u0 %oi7
+               OpStore %po7 %r7
+               OpReturn
+               OpFunctionEnd

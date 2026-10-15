@@ -1,0 +1,88 @@
+; Vertex test shader for tests/flat_gpu.mm: flat float, signed and unsigned integer vector varyings with a distinct
+; value per vertex (derived from gl_VertexIndex), and a smooth float for contrast. One full-target triangle.
+;   location 0: flat float   f  = 1.5 * v + 1
+;   location 1: ivec2        i  = (-(v + 1), 100 * v - 7)
+;   location 2: uvec3        u  = (0xF0000000 + 0x10001 * v, 0xFFFFFFFF - v, 0x9E3779B9 * (v + 1))
+;   location 3: smooth float s  = v
+               OpCapability Shader
+               OpMemoryModel Logical GLSL450
+               OpEntryPoint Vertex %main "main" %vid %f %i %u %s %gl_PerVertex
+               OpDecorate %vid BuiltIn VertexIndex
+               OpDecorate %f Location 0
+               OpDecorate %f Flat
+               OpDecorate %i Location 1
+               OpDecorate %i Flat
+               OpDecorate %u Location 2
+               OpDecorate %u Flat
+               OpDecorate %s Location 3
+               OpMemberDecorate %PerVertex 0 BuiltIn Position
+               OpDecorate %PerVertex Block
+       %void = OpTypeVoid
+       %fnty = OpTypeFunction %void
+       %bool = OpTypeBool
+      %float = OpTypeFloat 32
+        %int = OpTypeInt 32 1
+       %uint = OpTypeInt 32 0
+     %float4 = OpTypeVector %float 4
+       %int2 = OpTypeVector %int 2
+      %uint3 = OpTypeVector %uint 3
+  %PerVertex = OpTypeStruct %float4
+    %p_out_pv = OpTypePointer Output %PerVertex
+%gl_PerVertex = OpVariable %p_out_pv Output
+    %p_out_f4 = OpTypePointer Output %float4
+    %p_out_f = OpTypePointer Output %float
+    %p_out_i2 = OpTypePointer Output %int2
+    %p_out_u3 = OpTypePointer Output %uint3
+    %p_in_u = OpTypePointer Input %uint
+        %vid = OpVariable %p_in_u Input
+          %f = OpVariable %p_out_f Output
+          %i = OpVariable %p_out_i2 Output
+          %u = OpVariable %p_out_u3 Output
+          %s = OpVariable %p_out_f Output
+    %p_out_f4_ = OpTypePointer Output %float4
+      %c0 = OpConstant %uint 0
+      %c1 = OpConstant %uint 1
+      %c2 = OpConstant %uint 2
+      %fneg1 = OpConstant %float -1
+      %f3 = OpConstant %float 3
+      %f0 = OpConstant %float 0
+      %f1 = OpConstant %float 1
+      %f15 = OpConstant %float 1.5
+      %i1 = OpConstant %int 1
+      %i100 = OpConstant %int 100
+      %i7 = OpConstant %int 7
+      %ub = OpConstant %uint 4026531840
+      %um = OpConstant %uint 65537
+      %uf = OpConstant %uint 4294967295
+      %ug = OpConstant %uint 2654435769
+       %main = OpFunction %void None %fnty
+      %entry = OpLabel
+         %v = OpLoad %uint %vid
+        %vi = OpBitcast %int %v
+        %vf = OpConvertUToF %float %v
+       %is1 = OpIEqual %bool %v %c1
+       %is2 = OpIEqual %bool %v %c2
+         %x = OpSelect %float %is1 %f3 %fneg1
+         %y = OpSelect %float %is2 %f3 %fneg1
+        %pos = OpCompositeConstruct %float4 %x %y %f0 %f1
+        %pp = OpAccessChain %p_out_f4 %gl_PerVertex %c0
+               OpStore %pp %pos
+         %m = OpFMul %float %vf %f15
+        %fv = OpFAdd %float %m %f1
+               OpStore %f %fv
+         %v1 = OpIAdd %int %vi %i1
+        %i0 = OpSNegate %int %v1
+        %m2 = OpIMul %int %vi %i100
+        %i1v = OpISub %int %m2 %i7
+        %iv = OpCompositeConstruct %int2 %i0 %i1v
+               OpStore %i %iv
+        %mu = OpIMul %uint %v %um
+        %u0 = OpIAdd %uint %ub %mu
+        %u1 = OpISub %uint %uf %v
+        %vp1 = OpIAdd %uint %v %c1
+        %u2 = OpIMul %uint %ug %vp1
+        %uv = OpCompositeConstruct %uint3 %u0 %u1 %u2
+               OpStore %u %uv
+               OpStore %s %vf
+               OpReturn
+               OpFunctionEnd

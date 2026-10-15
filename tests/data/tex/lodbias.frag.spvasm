@@ -1,0 +1,62 @@
+; Pixel test shader for tests/tex_gpu.mm: the Bias and Lod image operands on a mipmapped 2D texture.
+; c = the vec4 in the uniform block at set 1 binding 0; uv = gl_FragCoord.xy * c.x, so the implicit level of detail
+; follows from the screen-space derivatives. out = (texture(t, uv, bias c.y).x, textureLod(t, uv, c.z).x, 0, 1).
+               OpCapability Shader
+               OpMemoryModel Logical GLSL450
+               OpEntryPoint Fragment %main "main" %frag %out
+               OpExecutionMode %main OriginUpperLeft
+               OpDecorate %frag BuiltIn FragCoord
+               OpDecorate %out Location 0
+               OpMemberDecorate %Block 0 Offset 0
+               OpDecorate %Block Block
+               OpDecorate %ubo DescriptorSet 1
+               OpDecorate %ubo Binding 0
+               OpDecorate %tex DescriptorSet 3
+               OpDecorate %tex Binding 0
+               OpDecorate %smp DescriptorSet 3
+               OpDecorate %smp Binding 1
+       %void = OpTypeVoid
+       %fnty = OpTypeFunction %void
+      %float = OpTypeFloat 32
+        %int = OpTypeInt 32 1
+         %v2 = OpTypeVector %float 2
+         %v4 = OpTypeVector %float 4
+         %f0 = OpConstant %float 0
+         %f1 = OpConstant %float 1
+       %int0 = OpConstant %int 0
+      %Block = OpTypeStruct %v4
+   %p_un_blk = OpTypePointer Uniform %Block
+    %p_un_v4 = OpTypePointer Uniform %v4
+    %p_in_v4 = OpTypePointer Input %v4
+   %p_out_v4 = OpTypePointer Output %v4
+        %img = OpTypeImage %float 2D 0 0 0 1 Unknown
+      %p_img = OpTypePointer UniformConstant %img
+        %sam = OpTypeSampler
+      %p_sam = OpTypePointer UniformConstant %sam
+    %sampled = OpTypeSampledImage %img
+        %ubo = OpVariable %p_un_blk Uniform
+        %tex = OpVariable %p_img UniformConstant
+        %smp = OpVariable %p_sam UniformConstant
+       %frag = OpVariable %p_in_v4 Input
+        %out = OpVariable %p_out_v4 Output
+       %main = OpFunction %void None %fnty
+      %entry = OpLabel
+         %cp = OpAccessChain %p_un_v4 %ubo %int0
+          %c = OpLoad %v4 %cp
+         %fc = OpLoad %v4 %frag
+        %fxy = OpVectorShuffle %v2 %fc %fc 0 1
+      %scale = OpCompositeExtract %float %c 0
+       %bias = OpCompositeExtract %float %c 1
+        %lod = OpCompositeExtract %float %c 2
+         %uv = OpVectorTimesScalar %v2 %fxy %scale
+         %im = OpLoad %img %tex
+         %sm = OpLoad %sam %smp
+         %si = OpSampledImage %sampled %im %sm
+         %rb = OpImageSampleImplicitLod %v4 %si %uv Bias %bias
+         %rl = OpImageSampleExplicitLod %v4 %si %uv Lod %lod
+         %xb = OpCompositeExtract %float %rb 0
+         %xl = OpCompositeExtract %float %rl 0
+          %r = OpCompositeConstruct %v4 %xb %xl %f0 %f1
+               OpStore %out %r
+               OpReturn
+               OpFunctionEnd

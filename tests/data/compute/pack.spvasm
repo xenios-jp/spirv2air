@@ -1,0 +1,55 @@
+; Compute test shader for tests/compute_gpu.mm: GLSL.std.450 PackHalf2x16. For g = GlobalInvocationId.x, out[g] =
+; PackHalf2x16(vec2(in[2g], in[2g+1])): the IEEE binary16 conversion, round to nearest even, overflow to infinity.
+               OpCapability Shader
+          %glsl = OpExtInstImport "GLSL.std.450"
+               OpMemoryModel Logical GLSL450
+               OpEntryPoint GLCompute %main "main" %gid
+               OpExecutionMode %main LocalSize 64 1 1
+               OpDecorate %gid BuiltIn GlobalInvocationId
+               OpDecorate %farr ArrayStride 4
+               OpDecorate %uarr ArrayStride 4
+               OpMemberDecorate %FBuf 0 Offset 0
+               OpMemberDecorate %UBuf 0 Offset 0
+               OpDecorate %FBuf Block
+               OpDecorate %UBuf Block
+               OpDecorate %inb DescriptorSet 0
+               OpDecorate %inb Binding 0
+               OpDecorate %outb DescriptorSet 0
+               OpDecorate %outb Binding 1
+       %void = OpTypeVoid
+       %fnty = OpTypeFunction %void
+      %float = OpTypeFloat 32
+       %uint = OpTypeInt 32 0
+     %float2 = OpTypeVector %float 2
+      %uint3 = OpTypeVector %uint 3
+       %farr = OpTypeRuntimeArray %float
+       %uarr = OpTypeRuntimeArray %uint
+       %FBuf = OpTypeStruct %farr
+       %UBuf = OpTypeStruct %uarr
+         %u0 = OpConstant %uint 0
+         %u1 = OpConstant %uint 1
+         %u2 = OpConstant %uint 2
+ %p_sb_fbuf = OpTypePointer StorageBuffer %FBuf
+ %p_sb_ubuf = OpTypePointer StorageBuffer %UBuf
+    %p_sb_f = OpTypePointer StorageBuffer %float
+    %p_sb_u = OpTypePointer StorageBuffer %uint
+   %p_in_u3 = OpTypePointer Input %uint3
+        %inb = OpVariable %p_sb_fbuf StorageBuffer
+       %outb = OpVariable %p_sb_ubuf StorageBuffer
+        %gid = OpVariable %p_in_u3 Input
+       %main = OpFunction %void None %fnty
+      %entry = OpLabel
+          %g = OpLoad %uint3 %gid
+         %gx = OpCompositeExtract %uint %g 0
+         %i0 = OpIMul %uint %gx %u2
+         %i1 = OpIAdd %uint %i0 %u1
+         %p0 = OpAccessChain %p_sb_f %inb %u0 %i0
+         %p1 = OpAccessChain %p_sb_f %inb %u0 %i1
+         %f0 = OpLoad %float %p0
+         %f1 = OpLoad %float %p1
+          %v = OpCompositeConstruct %float2 %f0 %f1
+          %r = OpExtInst %uint %glsl PackHalf2x16 %v
+         %op = OpAccessChain %p_sb_u %outb %u0 %gx
+               OpStore %op %r
+               OpReturn
+               OpFunctionEnd

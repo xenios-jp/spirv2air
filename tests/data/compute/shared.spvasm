@@ -1,0 +1,122 @@
+; Compute test shader for tests/compute_gpu.mm: Workgroup memory, barriers (also inside a loop), a push constant, and
+; the SPIR-V 1.0 buffer forms legacy front ends use (BufferBlock on a Uniform variable, NonWritable members).
+; With 64 invocations per group and g = global invocation, l = local index:
+;   out[g]  = in[64 * wg + 63 - l] + push.add      (reverse through shared memory)
+;   sums[wg] = the sum of the group's 64 inputs     (tree reduction in shared memory, a barrier per round)
+               OpCapability Shader
+               OpMemoryModel Logical GLSL450
+               OpEntryPoint GLCompute %main "main" %gid %wg %lidx
+               OpExecutionMode %main LocalSize 64 1 1
+               OpDecorate %gid BuiltIn GlobalInvocationId
+               OpDecorate %wg BuiltIn WorkgroupId
+               OpDecorate %lidx BuiltIn LocalInvocationIndex
+               OpDecorate %arr ArrayStride 4
+               OpMemberDecorate %In 0 NonWritable
+               OpMemberDecorate %In 0 Offset 0
+               OpDecorate %In BufferBlock
+               OpMemberDecorate %Out 0 NonReadable
+               OpMemberDecorate %Out 0 Offset 0
+               OpDecorate %Out BufferBlock
+               OpMemberDecorate %Push 0 Offset 0
+               OpDecorate %Push Block
+               OpDecorate %in DescriptorSet 0
+               OpDecorate %in Binding 0
+               OpDecorate %out DescriptorSet 0
+               OpDecorate %out Binding 1
+               OpDecorate %sums DescriptorSet 0
+               OpDecorate %sums Binding 2
+       %void = OpTypeVoid
+       %fnty = OpTypeFunction %void
+       %bool = OpTypeBool
+       %uint = OpTypeInt 32 0
+      %uint3 = OpTypeVector %uint 3
+        %arr = OpTypeRuntimeArray %uint
+         %In = OpTypeStruct %arr
+        %Out = OpTypeStruct %arr
+       %Push = OpTypeStruct %uint
+         %u0 = OpConstant %uint 0
+         %u1 = OpConstant %uint 1
+         %u2 = OpConstant %uint 2
+        %u264 = OpConstant %uint 264
+        %u32 = OpConstant %uint 32
+        %u63 = OpConstant %uint 63
+        %u64 = OpConstant %uint 64
+        %shared_arr = OpTypeArray %uint %u64
+    %p_un_in = OpTypePointer Uniform %In
+   %p_un_out = OpTypePointer Uniform %Out
+  %p_pc_push = OpTypePointer PushConstant %Push
+     %p_un_u = OpTypePointer Uniform %uint
+     %p_pc_u = OpTypePointer PushConstant %uint
+   %p_wg_arr = OpTypePointer Workgroup %shared_arr
+     %p_wg_u = OpTypePointer Workgroup %uint
+    %p_in_u3 = OpTypePointer Input %uint3
+     %p_in_u = OpTypePointer Input %uint
+         %in = OpVariable %p_un_in Uniform
+        %out = OpVariable %p_un_out Uniform
+       %sums = OpVariable %p_un_out Uniform
+       %push = OpVariable %p_pc_push PushConstant
+     %shared = OpVariable %p_wg_arr Workgroup
+        %gid = OpVariable %p_in_u3 Input
+         %wg = OpVariable %p_in_u3 Input
+       %lidx = OpVariable %p_in_u Input
+       %main = OpFunction %void None %fnty
+      %entry = OpLabel
+          %g = OpLoad %uint3 %gid
+         %gx = OpCompositeExtract %uint %g 0
+          %w = OpLoad %uint3 %wg
+         %wx = OpCompositeExtract %uint %w 0
+         %li = OpLoad %uint %lidx
+        %inp = OpAccessChain %p_un_u %in %u0 %gx
+        %val = OpLoad %uint %inp
+        %shp = OpAccessChain %p_wg_u %shared %li
+               OpStore %shp %val
+               OpControlBarrier %u2 %u2 %u264
+        %rev = OpISub %uint %u63 %li
+       %rvp = OpAccessChain %p_wg_u %shared %rev
+        %rv = OpLoad %uint %rvp
+       %addp = OpAccessChain %p_pc_u %push %u0
+       %add = OpLoad %uint %addp
+        %res = OpIAdd %uint %rv %add
+       %outp = OpAccessChain %p_un_u %out %u0 %gx
+               OpStore %outp %res
+               OpControlBarrier %u2 %u2 %u264
+               OpBranch %loop
+       %loop = OpLabel
+     %stride = OpPhi %uint %u32 %entry %nstride %cont
+               OpLoopMerge %merge %cont None
+               OpBranch %check
+      %check = OpLabel
+       %more = OpUGreaterThan %bool %stride %u0
+               OpBranchConditional %more %body %merge
+       %body = OpLabel
+     %active = OpULessThan %bool %li %stride
+               OpSelectionMerge %endif None
+               OpBranchConditional %active %then %endif
+       %then = OpLabel
+         %lo = OpAccessChain %p_wg_u %shared %li
+       %loff = OpIAdd %uint %li %stride
+         %hi = OpAccessChain %p_wg_u %shared %loff
+         %a = OpLoad %uint %lo
+         %b = OpLoad %uint %hi
+        %ab = OpIAdd %uint %a %b
+               OpStore %lo %ab
+               OpBranch %endif
+      %endif = OpLabel
+               OpControlBarrier %u2 %u2 %u264
+               OpBranch %cont
+       %cont = OpLabel
+    %nstride = OpShiftRightLogical %uint %stride %u1
+               OpBranch %loop
+      %merge = OpLabel
+        %is0 = OpIEqual %bool %li %u0
+               OpSelectionMerge %done None
+               OpBranchConditional %is0 %w0 %done
+         %w0 = OpLabel
+       %tp = OpAccessChain %p_wg_u %shared %u0
+      %total = OpLoad %uint %tp
+       %sp = OpAccessChain %p_un_u %sums %u0 %wx
+               OpStore %sp %total
+               OpBranch %done
+       %done = OpLabel
+               OpReturn
+               OpFunctionEnd

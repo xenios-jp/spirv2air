@@ -1,0 +1,47 @@
+; Pixel test shader for tests/math_gpu.mm: the approximate Metal math intrinsics on NaN, infinity and signed zero.
+; With (a, b) = the first two components of the vec4 in the uniform block at set 1 binding 0:
+;   out = (NMin(a, b), NMax(a, b), FMin(FMax(a, 0), 1), Sqrt(a) + (RoundEven(a) - RoundEven(a)))
+; NMin and NMax return the other operand when one is NaN (so does the clamp: a NaN saturates to 0, as in D3D). The last
+; component adds RoundEven(a) - RoundEven(a), which is 0 for a finite a and NaN for an infinity or a NaN.
+               OpCapability Shader
+          %glsl = OpExtInstImport "GLSL.std.450"
+               OpMemoryModel Logical GLSL450
+               OpEntryPoint Fragment %main "main" %out
+               OpExecutionMode %main OriginUpperLeft
+               OpDecorate %out Location 0
+               OpMemberDecorate %Block 0 Offset 0
+               OpDecorate %Block Block
+               OpDecorate %ubo DescriptorSet 1
+               OpDecorate %ubo Binding 0
+       %void = OpTypeVoid
+       %fnty = OpTypeFunction %void
+      %float = OpTypeFloat 32
+        %int = OpTypeInt 32 1
+         %v4 = OpTypeVector %float 4
+         %f0 = OpConstant %float 0
+         %f1 = OpConstant %float 1
+       %int0 = OpConstant %int 0
+      %Block = OpTypeStruct %v4
+    %p_un_blk = OpTypePointer Uniform %Block
+    %p_un_v4 = OpTypePointer Uniform %v4
+   %p_out_v4 = OpTypePointer Output %v4
+        %ubo = OpVariable %p_un_blk Uniform
+        %out = OpVariable %p_out_v4 Output
+       %main = OpFunction %void None %fnty
+      %entry = OpLabel
+         %cp = OpAccessChain %p_un_v4 %ubo %int0
+          %c = OpLoad %v4 %cp
+          %a = OpCompositeExtract %float %c 0
+          %b = OpCompositeExtract %float %c 1
+        %nmin = OpExtInst %float %glsl NMin %a %b
+        %nmax = OpExtInst %float %glsl NMax %a %b
+        %lo = OpExtInst %float %glsl FMax %a %f0
+        %sat = OpExtInst %float %glsl FMin %lo %f1
+        %sq = OpExtInst %float %glsl Sqrt %a
+         %ri = OpExtInst %float %glsl RoundEven %a
+        %ri0 = OpFSub %float %ri %ri
+         %w = OpFAdd %float %sq %ri0
+         %o = OpCompositeConstruct %v4 %nmin %nmax %sat %w
+               OpStore %out %o
+               OpReturn
+               OpFunctionEnd

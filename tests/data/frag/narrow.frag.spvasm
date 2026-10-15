@@ -1,0 +1,47 @@
+; Pixel test shader for tests/flat_gpu.mm: colour outputs narrower than four components, from the varyings of
+; flat.vert.spvasm: rt0 float (f), rt1 int2 (i), rt2 uint2 (u.xy). (No pixel format has three 32-bit components, and Metal requires
+; the format to have at least as many components as the output.)
+               OpCapability Shader
+               OpMemoryModel Logical GLSL450
+               OpEntryPoint Fragment %main "main" %f %i %u %o0 %o1 %o2
+               OpExecutionMode %main OriginUpperLeft
+               OpDecorate %f Location 0
+               OpDecorate %f Flat
+               OpDecorate %i Location 1
+               OpDecorate %i Flat
+               OpDecorate %u Location 2
+               OpDecorate %u Flat
+               OpDecorate %o0 Location 0
+               OpDecorate %o1 Location 1
+               OpDecorate %o2 Location 2
+       %void = OpTypeVoid
+       %fnty = OpTypeFunction %void
+      %float = OpTypeFloat 32
+        %int = OpTypeInt 32 1
+       %uint = OpTypeInt 32 0
+       %int2 = OpTypeVector %int 2
+      %uint3 = OpTypeVector %uint 3
+      %uint2 = OpTypeVector %uint 2
+    %p_in_f = OpTypePointer Input %float
+    %p_in_i2 = OpTypePointer Input %int2
+    %p_in_u3 = OpTypePointer Input %uint3
+    %p_out_f = OpTypePointer Output %float
+    %p_out_i2 = OpTypePointer Output %int2
+    %p_out_u2 = OpTypePointer Output %uint2
+          %f = OpVariable %p_in_f Input
+          %i = OpVariable %p_in_i2 Input
+          %u = OpVariable %p_in_u3 Input
+         %o0 = OpVariable %p_out_f Output
+         %o1 = OpVariable %p_out_i2 Output
+         %o2 = OpVariable %p_out_u2 Output
+       %main = OpFunction %void None %fnty
+      %entry = OpLabel
+         %fv = OpLoad %float %f
+               OpStore %o0 %fv
+         %iv = OpLoad %int2 %i
+               OpStore %o1 %iv
+         %uv = OpLoad %uint3 %u
+        %uw = OpVectorShuffle %uint2 %uv %uv 0 1
+               OpStore %o2 %uw
+               OpReturn
+               OpFunctionEnd

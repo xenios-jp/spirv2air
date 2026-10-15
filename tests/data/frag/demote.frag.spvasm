@@ -1,0 +1,59 @@
+; Pixel test shader for tests/frag_gpu.mm: OpIsHelperInvocationEXT is true after OpDemoteToHelperInvocation
+; (VK_EXT_demote_to_helper_invocation). Sample 1 is demoted; every invocation that is then a helper adds 1 to the
+; counter at set 0 binding 1. out = (1, 1, 1, 1).
+               OpCapability Shader
+               OpCapability SampleRateShading
+               OpCapability DemoteToHelperInvocationEXT
+               OpExtension "SPV_EXT_demote_to_helper_invocation"
+               OpMemoryModel Logical GLSL450
+               OpEntryPoint Fragment %main "main" %sid %out
+               OpExecutionMode %main OriginUpperLeft
+               OpDecorate %sid BuiltIn SampleId
+               OpDecorate %sid Flat
+               OpDecorate %out Location 0
+               OpMemberDecorate %Counter 0 Offset 0
+               OpDecorate %Counter Block
+               OpDecorate %counter DescriptorSet 0
+               OpDecorate %counter Binding 1
+               OpDecorate %counter Coherent
+       %void = OpTypeVoid
+       %fnty = OpTypeFunction %void
+       %bool = OpTypeBool
+      %float = OpTypeFloat 32
+        %int = OpTypeInt 32 1
+       %uint = OpTypeInt 32 0
+     %float4 = OpTypeVector %float 4
+    %Counter = OpTypeStruct %uint
+         %u0 = OpConstant %uint 0
+         %u1 = OpConstant %uint 1
+         %i1 = OpConstant %int 1
+         %f1 = OpConstant %float 1
+        %one = OpConstantComposite %float4 %f1 %f1 %f1 %f1
+   %p_in_int = OpTypePointer Input %int
+   %p_out_f4 = OpTypePointer Output %float4
+   %p_sb_ctr = OpTypePointer StorageBuffer %Counter
+    %p_sb_u = OpTypePointer StorageBuffer %uint
+        %sid = OpVariable %p_in_int Input
+        %out = OpVariable %p_out_f4 Output
+    %counter = OpVariable %p_sb_ctr StorageBuffer
+       %main = OpFunction %void None %fnty
+      %entry = OpLabel
+       %sidv = OpLoad %int %sid
+        %is1 = OpIEqual %bool %sidv %i1
+               OpSelectionMerge %after None
+               OpBranchConditional %is1 %demote %after
+     %demote = OpLabel
+               OpDemoteToHelperInvocationEXT
+               OpBranch %after
+      %after = OpLabel
+         %hp = OpIsHelperInvocationEXT %bool
+               OpSelectionMerge %done None
+               OpBranchConditional %hp %count %done
+      %count = OpLabel
+         %cp = OpAccessChain %p_sb_u %counter %u0
+          %o = OpAtomicIAdd %uint %cp %u1 %u0 %u1
+               OpBranch %done
+       %done = OpLabel
+               OpStore %out %one
+               OpReturn
+               OpFunctionEnd

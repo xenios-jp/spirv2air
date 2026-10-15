@@ -1,0 +1,1263 @@
+; Compute test shader for tests/math_gpu.mm: the GLSL.std.450 math and geometric instructions added in batch 1.
+; Row r of the input buffer holds 12 floats, the vec4s a, b, c; the output row (221 floats) is, in order: for the
+; scalars sa = a.x, sb = b.x, sc = c.x then the vec2, vec3 and vec4 forms (a, b, c truncated), the 17 results
+; Round Tan Asin Acos Atan Atan2(a,b) Sinh Cosh Tanh Asinh Acosh Atanh Radians Degrees FMix(a,b,c) Step(a,b)
+; SmoothStep(a,b,c); then for vec2, vec3, vec4: Length(a) Distance(a,b) Normalize(a) FaceForward(a,b,c) Reflect(a,b)
+; Refract(a,b,sc); then Cross(a.xyz,b.xyz); then the scalar Length, Distance, Normalize, FaceForward, Reflect, Refract.
+OpCapability Shader
+%glsl = OpExtInstImport "GLSL.std.450"
+OpMemoryModel Logical GLSL450
+OpEntryPoint GLCompute %main "main" %gid
+OpExecutionMode %main LocalSize 64 1 1
+OpDecorate %gid BuiltIn GlobalInvocationId
+OpDecorate %arr ArrayStride 4
+OpMemberDecorate %Buf 0 Offset 0
+OpDecorate %Buf Block
+OpDecorate %inb DescriptorSet 0
+OpDecorate %inb Binding 0
+OpDecorate %outb DescriptorSet 0
+OpDecorate %outb Binding 1
+%void = OpTypeVoid
+%fn = OpTypeFunction %void
+%u = OpTypeInt 32 0
+%i = OpTypeInt 32 1
+%f = OpTypeFloat 32
+%v2 = OpTypeVector %f 2
+%v3 = OpTypeVector %f 3
+%v4 = OpTypeVector %f 4
+%u3 = OpTypeVector %u 3
+%f0 = OpConstant %f 0
+%arr = OpTypeRuntimeArray %f
+%Buf = OpTypeStruct %arr
+%pb = OpTypePointer StorageBuffer %Buf
+%pf = OpTypePointer StorageBuffer %f
+%pg = OpTypePointer Input %u3
+%inb = OpVariable %pb StorageBuffer
+%outb = OpVariable %pb StorageBuffer
+%gid = OpVariable %pg Input
+%cu0 = OpConstant %u 0
+%cu1 = OpConstant %u 1
+%cu2 = OpConstant %u 2
+%cu3 = OpConstant %u 3
+%cu4 = OpConstant %u 4
+%cu5 = OpConstant %u 5
+%cu6 = OpConstant %u 6
+%cu7 = OpConstant %u 7
+%cu8 = OpConstant %u 8
+%cu9 = OpConstant %u 9
+%cu10 = OpConstant %u 10
+%cu11 = OpConstant %u 11
+%cu12 = OpConstant %u 12
+%cu13 = OpConstant %u 13
+%cu14 = OpConstant %u 14
+%cu15 = OpConstant %u 15
+%cu16 = OpConstant %u 16
+%cu17 = OpConstant %u 17
+%cu18 = OpConstant %u 18
+%cu19 = OpConstant %u 19
+%cu20 = OpConstant %u 20
+%cu21 = OpConstant %u 21
+%cu22 = OpConstant %u 22
+%cu23 = OpConstant %u 23
+%cu24 = OpConstant %u 24
+%cu25 = OpConstant %u 25
+%cu26 = OpConstant %u 26
+%cu27 = OpConstant %u 27
+%cu28 = OpConstant %u 28
+%cu29 = OpConstant %u 29
+%cu30 = OpConstant %u 30
+%cu31 = OpConstant %u 31
+%cu32 = OpConstant %u 32
+%cu33 = OpConstant %u 33
+%cu34 = OpConstant %u 34
+%cu35 = OpConstant %u 35
+%cu36 = OpConstant %u 36
+%cu37 = OpConstant %u 37
+%cu38 = OpConstant %u 38
+%cu39 = OpConstant %u 39
+%cu40 = OpConstant %u 40
+%cu41 = OpConstant %u 41
+%cu42 = OpConstant %u 42
+%cu43 = OpConstant %u 43
+%cu44 = OpConstant %u 44
+%cu45 = OpConstant %u 45
+%cu46 = OpConstant %u 46
+%cu47 = OpConstant %u 47
+%cu48 = OpConstant %u 48
+%cu49 = OpConstant %u 49
+%cu50 = OpConstant %u 50
+%cu51 = OpConstant %u 51
+%cu52 = OpConstant %u 52
+%cu53 = OpConstant %u 53
+%cu54 = OpConstant %u 54
+%cu55 = OpConstant %u 55
+%cu56 = OpConstant %u 56
+%cu57 = OpConstant %u 57
+%cu58 = OpConstant %u 58
+%cu59 = OpConstant %u 59
+%cu60 = OpConstant %u 60
+%cu61 = OpConstant %u 61
+%cu62 = OpConstant %u 62
+%cu63 = OpConstant %u 63
+%cu64 = OpConstant %u 64
+%cu65 = OpConstant %u 65
+%cu66 = OpConstant %u 66
+%cu67 = OpConstant %u 67
+%cu68 = OpConstant %u 68
+%cu69 = OpConstant %u 69
+%cu70 = OpConstant %u 70
+%cu71 = OpConstant %u 71
+%cu72 = OpConstant %u 72
+%cu73 = OpConstant %u 73
+%cu74 = OpConstant %u 74
+%cu75 = OpConstant %u 75
+%cu76 = OpConstant %u 76
+%cu77 = OpConstant %u 77
+%cu78 = OpConstant %u 78
+%cu79 = OpConstant %u 79
+%cu80 = OpConstant %u 80
+%cu81 = OpConstant %u 81
+%cu82 = OpConstant %u 82
+%cu83 = OpConstant %u 83
+%cu84 = OpConstant %u 84
+%cu85 = OpConstant %u 85
+%cu86 = OpConstant %u 86
+%cu87 = OpConstant %u 87
+%cu88 = OpConstant %u 88
+%cu89 = OpConstant %u 89
+%cu90 = OpConstant %u 90
+%cu91 = OpConstant %u 91
+%cu92 = OpConstant %u 92
+%cu93 = OpConstant %u 93
+%cu94 = OpConstant %u 94
+%cu95 = OpConstant %u 95
+%cu96 = OpConstant %u 96
+%cu97 = OpConstant %u 97
+%cu98 = OpConstant %u 98
+%cu99 = OpConstant %u 99
+%cu100 = OpConstant %u 100
+%cu101 = OpConstant %u 101
+%cu102 = OpConstant %u 102
+%cu103 = OpConstant %u 103
+%cu104 = OpConstant %u 104
+%cu105 = OpConstant %u 105
+%cu106 = OpConstant %u 106
+%cu107 = OpConstant %u 107
+%cu108 = OpConstant %u 108
+%cu109 = OpConstant %u 109
+%cu110 = OpConstant %u 110
+%cu111 = OpConstant %u 111
+%cu112 = OpConstant %u 112
+%cu113 = OpConstant %u 113
+%cu114 = OpConstant %u 114
+%cu115 = OpConstant %u 115
+%cu116 = OpConstant %u 116
+%cu117 = OpConstant %u 117
+%cu118 = OpConstant %u 118
+%cu119 = OpConstant %u 119
+%cu120 = OpConstant %u 120
+%cu121 = OpConstant %u 121
+%cu122 = OpConstant %u 122
+%cu123 = OpConstant %u 123
+%cu124 = OpConstant %u 124
+%cu125 = OpConstant %u 125
+%cu126 = OpConstant %u 126
+%cu127 = OpConstant %u 127
+%cu128 = OpConstant %u 128
+%cu129 = OpConstant %u 129
+%cu130 = OpConstant %u 130
+%cu131 = OpConstant %u 131
+%cu132 = OpConstant %u 132
+%cu133 = OpConstant %u 133
+%cu134 = OpConstant %u 134
+%cu135 = OpConstant %u 135
+%cu136 = OpConstant %u 136
+%cu137 = OpConstant %u 137
+%cu138 = OpConstant %u 138
+%cu139 = OpConstant %u 139
+%cu140 = OpConstant %u 140
+%cu141 = OpConstant %u 141
+%cu142 = OpConstant %u 142
+%cu143 = OpConstant %u 143
+%cu144 = OpConstant %u 144
+%cu145 = OpConstant %u 145
+%cu146 = OpConstant %u 146
+%cu147 = OpConstant %u 147
+%cu148 = OpConstant %u 148
+%cu149 = OpConstant %u 149
+%cu150 = OpConstant %u 150
+%cu151 = OpConstant %u 151
+%cu152 = OpConstant %u 152
+%cu153 = OpConstant %u 153
+%cu154 = OpConstant %u 154
+%cu155 = OpConstant %u 155
+%cu156 = OpConstant %u 156
+%cu157 = OpConstant %u 157
+%cu158 = OpConstant %u 158
+%cu159 = OpConstant %u 159
+%cu160 = OpConstant %u 160
+%cu161 = OpConstant %u 161
+%cu162 = OpConstant %u 162
+%cu163 = OpConstant %u 163
+%cu164 = OpConstant %u 164
+%cu165 = OpConstant %u 165
+%cu166 = OpConstant %u 166
+%cu167 = OpConstant %u 167
+%cu168 = OpConstant %u 168
+%cu169 = OpConstant %u 169
+%cu170 = OpConstant %u 170
+%cu171 = OpConstant %u 171
+%cu172 = OpConstant %u 172
+%cu173 = OpConstant %u 173
+%cu174 = OpConstant %u 174
+%cu175 = OpConstant %u 175
+%cu176 = OpConstant %u 176
+%cu177 = OpConstant %u 177
+%cu178 = OpConstant %u 178
+%cu179 = OpConstant %u 179
+%cu180 = OpConstant %u 180
+%cu181 = OpConstant %u 181
+%cu182 = OpConstant %u 182
+%cu183 = OpConstant %u 183
+%cu184 = OpConstant %u 184
+%cu185 = OpConstant %u 185
+%cu186 = OpConstant %u 186
+%cu187 = OpConstant %u 187
+%cu188 = OpConstant %u 188
+%cu189 = OpConstant %u 189
+%cu190 = OpConstant %u 190
+%cu191 = OpConstant %u 191
+%cu192 = OpConstant %u 192
+%cu193 = OpConstant %u 193
+%cu194 = OpConstant %u 194
+%cu195 = OpConstant %u 195
+%cu196 = OpConstant %u 196
+%cu197 = OpConstant %u 197
+%cu198 = OpConstant %u 198
+%cu199 = OpConstant %u 199
+%cu200 = OpConstant %u 200
+%cu201 = OpConstant %u 201
+%cu202 = OpConstant %u 202
+%cu203 = OpConstant %u 203
+%cu204 = OpConstant %u 204
+%cu205 = OpConstant %u 205
+%cu206 = OpConstant %u 206
+%cu207 = OpConstant %u 207
+%cu208 = OpConstant %u 208
+%cu209 = OpConstant %u 209
+%cu210 = OpConstant %u 210
+%cu211 = OpConstant %u 211
+%cu212 = OpConstant %u 212
+%cu213 = OpConstant %u 213
+%cu214 = OpConstant %u 214
+%cu215 = OpConstant %u 215
+%cu216 = OpConstant %u 216
+%cu217 = OpConstant %u 217
+%cu218 = OpConstant %u 218
+%cu219 = OpConstant %u 219
+%cu220 = OpConstant %u 220
+%cu221 = OpConstant %u 221
+%main = OpFunction %void None %fn
+%entry = OpLabel
+%t1 = OpLoad %u3 %gid
+%t2 = OpCompositeExtract %u %t1 0
+%t3 = OpIMul %u %t2 %cu12
+%t4 = OpIMul %u %t2 %cu221
+%t5 = OpIAdd %u %t3 %cu0
+%t6 = OpAccessChain %pf %inb %cu0 %t5
+%t7 = OpLoad %f %t6
+%t8 = OpIAdd %u %t3 %cu1
+%t9 = OpAccessChain %pf %inb %cu0 %t8
+%t10 = OpLoad %f %t9
+%t11 = OpIAdd %u %t3 %cu2
+%t12 = OpAccessChain %pf %inb %cu0 %t11
+%t13 = OpLoad %f %t12
+%t14 = OpIAdd %u %t3 %cu3
+%t15 = OpAccessChain %pf %inb %cu0 %t14
+%t16 = OpLoad %f %t15
+%t17 = OpIAdd %u %t3 %cu4
+%t18 = OpAccessChain %pf %inb %cu0 %t17
+%t19 = OpLoad %f %t18
+%t20 = OpIAdd %u %t3 %cu5
+%t21 = OpAccessChain %pf %inb %cu0 %t20
+%t22 = OpLoad %f %t21
+%t23 = OpIAdd %u %t3 %cu6
+%t24 = OpAccessChain %pf %inb %cu0 %t23
+%t25 = OpLoad %f %t24
+%t26 = OpIAdd %u %t3 %cu7
+%t27 = OpAccessChain %pf %inb %cu0 %t26
+%t28 = OpLoad %f %t27
+%t29 = OpIAdd %u %t3 %cu8
+%t30 = OpAccessChain %pf %inb %cu0 %t29
+%t31 = OpLoad %f %t30
+%t32 = OpIAdd %u %t3 %cu9
+%t33 = OpAccessChain %pf %inb %cu0 %t32
+%t34 = OpLoad %f %t33
+%t35 = OpIAdd %u %t3 %cu10
+%t36 = OpAccessChain %pf %inb %cu0 %t35
+%t37 = OpLoad %f %t36
+%t38 = OpIAdd %u %t3 %cu11
+%t39 = OpAccessChain %pf %inb %cu0 %t38
+%t40 = OpLoad %f %t39
+%t41 = OpCompositeConstruct %v4 %t7 %t10 %t13 %t16
+%t42 = OpCompositeConstruct %v4 %t19 %t22 %t25 %t28
+%t43 = OpCompositeConstruct %v4 %t31 %t34 %t37 %t40
+%t44 = OpCompositeExtract %f %t41 0
+%t45 = OpCompositeExtract %f %t42 0
+%t46 = OpCompositeExtract %f %t43 0
+%t47 = OpExtInst %f %glsl Round %t44
+%t48 = OpExtInst %f %glsl Tan %t44
+%t49 = OpExtInst %f %glsl Asin %t44
+%t50 = OpExtInst %f %glsl Acos %t44
+%t51 = OpExtInst %f %glsl Atan %t44
+%t52 = OpExtInst %f %glsl Atan2 %t44 %t45
+%t53 = OpExtInst %f %glsl Sinh %t44
+%t54 = OpExtInst %f %glsl Cosh %t44
+%t55 = OpExtInst %f %glsl Tanh %t44
+%t56 = OpExtInst %f %glsl Asinh %t44
+%t57 = OpExtInst %f %glsl Acosh %t44
+%t58 = OpExtInst %f %glsl Atanh %t44
+%t59 = OpExtInst %f %glsl Radians %t44
+%t60 = OpExtInst %f %glsl Degrees %t44
+%t61 = OpExtInst %f %glsl FMix %t44 %t45 %t46
+%t62 = OpExtInst %f %glsl Step %t44 %t45
+%t63 = OpExtInst %f %glsl SmoothStep %t44 %t45 %t46
+%t64 = OpIAdd %u %t4 %cu0
+%t65 = OpAccessChain %pf %outb %cu0 %t64
+OpStore %t65 %t47
+%t66 = OpIAdd %u %t4 %cu1
+%t67 = OpAccessChain %pf %outb %cu0 %t66
+OpStore %t67 %t48
+%t68 = OpIAdd %u %t4 %cu2
+%t69 = OpAccessChain %pf %outb %cu0 %t68
+OpStore %t69 %t49
+%t70 = OpIAdd %u %t4 %cu3
+%t71 = OpAccessChain %pf %outb %cu0 %t70
+OpStore %t71 %t50
+%t72 = OpIAdd %u %t4 %cu4
+%t73 = OpAccessChain %pf %outb %cu0 %t72
+OpStore %t73 %t51
+%t74 = OpIAdd %u %t4 %cu5
+%t75 = OpAccessChain %pf %outb %cu0 %t74
+OpStore %t75 %t52
+%t76 = OpIAdd %u %t4 %cu6
+%t77 = OpAccessChain %pf %outb %cu0 %t76
+OpStore %t77 %t53
+%t78 = OpIAdd %u %t4 %cu7
+%t79 = OpAccessChain %pf %outb %cu0 %t78
+OpStore %t79 %t54
+%t80 = OpIAdd %u %t4 %cu8
+%t81 = OpAccessChain %pf %outb %cu0 %t80
+OpStore %t81 %t55
+%t82 = OpIAdd %u %t4 %cu9
+%t83 = OpAccessChain %pf %outb %cu0 %t82
+OpStore %t83 %t56
+%t84 = OpIAdd %u %t4 %cu10
+%t85 = OpAccessChain %pf %outb %cu0 %t84
+OpStore %t85 %t57
+%t86 = OpIAdd %u %t4 %cu11
+%t87 = OpAccessChain %pf %outb %cu0 %t86
+OpStore %t87 %t58
+%t88 = OpIAdd %u %t4 %cu12
+%t89 = OpAccessChain %pf %outb %cu0 %t88
+OpStore %t89 %t59
+%t90 = OpIAdd %u %t4 %cu13
+%t91 = OpAccessChain %pf %outb %cu0 %t90
+OpStore %t91 %t60
+%t92 = OpIAdd %u %t4 %cu14
+%t93 = OpAccessChain %pf %outb %cu0 %t92
+OpStore %t93 %t61
+%t94 = OpIAdd %u %t4 %cu15
+%t95 = OpAccessChain %pf %outb %cu0 %t94
+OpStore %t95 %t62
+%t96 = OpIAdd %u %t4 %cu16
+%t97 = OpAccessChain %pf %outb %cu0 %t96
+OpStore %t97 %t63
+%t98 = OpVectorShuffle %v2 %t41 %t41 0 1
+%t99 = OpVectorShuffle %v2 %t42 %t42 0 1
+%t100 = OpVectorShuffle %v2 %t43 %t43 0 1
+%t101 = OpVectorShuffle %v3 %t41 %t41 0 1 2
+%t102 = OpVectorShuffle %v3 %t42 %t42 0 1 2
+%t103 = OpVectorShuffle %v3 %t43 %t43 0 1 2
+%t104 = OpExtInst %v2 %glsl Round %t98
+%t105 = OpExtInst %v2 %glsl Tan %t98
+%t106 = OpExtInst %v2 %glsl Asin %t98
+%t107 = OpExtInst %v2 %glsl Acos %t98
+%t108 = OpExtInst %v2 %glsl Atan %t98
+%t109 = OpExtInst %v2 %glsl Atan2 %t98 %t99
+%t110 = OpExtInst %v2 %glsl Sinh %t98
+%t111 = OpExtInst %v2 %glsl Cosh %t98
+%t112 = OpExtInst %v2 %glsl Tanh %t98
+%t113 = OpExtInst %v2 %glsl Asinh %t98
+%t114 = OpExtInst %v2 %glsl Acosh %t98
+%t115 = OpExtInst %v2 %glsl Atanh %t98
+%t116 = OpExtInst %v2 %glsl Radians %t98
+%t117 = OpExtInst %v2 %glsl Degrees %t98
+%t118 = OpExtInst %v2 %glsl FMix %t98 %t99 %t100
+%t119 = OpExtInst %v2 %glsl Step %t98 %t99
+%t120 = OpExtInst %v2 %glsl SmoothStep %t98 %t99 %t100
+%t121 = OpCompositeExtract %f %t104 0
+%t122 = OpIAdd %u %t4 %cu17
+%t123 = OpAccessChain %pf %outb %cu0 %t122
+OpStore %t123 %t121
+%t124 = OpCompositeExtract %f %t104 1
+%t125 = OpIAdd %u %t4 %cu18
+%t126 = OpAccessChain %pf %outb %cu0 %t125
+OpStore %t126 %t124
+%t127 = OpCompositeExtract %f %t105 0
+%t128 = OpIAdd %u %t4 %cu19
+%t129 = OpAccessChain %pf %outb %cu0 %t128
+OpStore %t129 %t127
+%t130 = OpCompositeExtract %f %t105 1
+%t131 = OpIAdd %u %t4 %cu20
+%t132 = OpAccessChain %pf %outb %cu0 %t131
+OpStore %t132 %t130
+%t133 = OpCompositeExtract %f %t106 0
+%t134 = OpIAdd %u %t4 %cu21
+%t135 = OpAccessChain %pf %outb %cu0 %t134
+OpStore %t135 %t133
+%t136 = OpCompositeExtract %f %t106 1
+%t137 = OpIAdd %u %t4 %cu22
+%t138 = OpAccessChain %pf %outb %cu0 %t137
+OpStore %t138 %t136
+%t139 = OpCompositeExtract %f %t107 0
+%t140 = OpIAdd %u %t4 %cu23
+%t141 = OpAccessChain %pf %outb %cu0 %t140
+OpStore %t141 %t139
+%t142 = OpCompositeExtract %f %t107 1
+%t143 = OpIAdd %u %t4 %cu24
+%t144 = OpAccessChain %pf %outb %cu0 %t143
+OpStore %t144 %t142
+%t145 = OpCompositeExtract %f %t108 0
+%t146 = OpIAdd %u %t4 %cu25
+%t147 = OpAccessChain %pf %outb %cu0 %t146
+OpStore %t147 %t145
+%t148 = OpCompositeExtract %f %t108 1
+%t149 = OpIAdd %u %t4 %cu26
+%t150 = OpAccessChain %pf %outb %cu0 %t149
+OpStore %t150 %t148
+%t151 = OpCompositeExtract %f %t109 0
+%t152 = OpIAdd %u %t4 %cu27
+%t153 = OpAccessChain %pf %outb %cu0 %t152
+OpStore %t153 %t151
+%t154 = OpCompositeExtract %f %t109 1
+%t155 = OpIAdd %u %t4 %cu28
+%t156 = OpAccessChain %pf %outb %cu0 %t155
+OpStore %t156 %t154
+%t157 = OpCompositeExtract %f %t110 0
+%t158 = OpIAdd %u %t4 %cu29
+%t159 = OpAccessChain %pf %outb %cu0 %t158
+OpStore %t159 %t157
+%t160 = OpCompositeExtract %f %t110 1
+%t161 = OpIAdd %u %t4 %cu30
+%t162 = OpAccessChain %pf %outb %cu0 %t161
+OpStore %t162 %t160
+%t163 = OpCompositeExtract %f %t111 0
+%t164 = OpIAdd %u %t4 %cu31
+%t165 = OpAccessChain %pf %outb %cu0 %t164
+OpStore %t165 %t163
+%t166 = OpCompositeExtract %f %t111 1
+%t167 = OpIAdd %u %t4 %cu32
+%t168 = OpAccessChain %pf %outb %cu0 %t167
+OpStore %t168 %t166
+%t169 = OpCompositeExtract %f %t112 0
+%t170 = OpIAdd %u %t4 %cu33
+%t171 = OpAccessChain %pf %outb %cu0 %t170
+OpStore %t171 %t169
+%t172 = OpCompositeExtract %f %t112 1
+%t173 = OpIAdd %u %t4 %cu34
+%t174 = OpAccessChain %pf %outb %cu0 %t173
+OpStore %t174 %t172
+%t175 = OpCompositeExtract %f %t113 0
+%t176 = OpIAdd %u %t4 %cu35
+%t177 = OpAccessChain %pf %outb %cu0 %t176
+OpStore %t177 %t175
+%t178 = OpCompositeExtract %f %t113 1
+%t179 = OpIAdd %u %t4 %cu36
+%t180 = OpAccessChain %pf %outb %cu0 %t179
+OpStore %t180 %t178
+%t181 = OpCompositeExtract %f %t114 0
+%t182 = OpIAdd %u %t4 %cu37
+%t183 = OpAccessChain %pf %outb %cu0 %t182
+OpStore %t183 %t181
+%t184 = OpCompositeExtract %f %t114 1
+%t185 = OpIAdd %u %t4 %cu38
+%t186 = OpAccessChain %pf %outb %cu0 %t185
+OpStore %t186 %t184
+%t187 = OpCompositeExtract %f %t115 0
+%t188 = OpIAdd %u %t4 %cu39
+%t189 = OpAccessChain %pf %outb %cu0 %t188
+OpStore %t189 %t187
+%t190 = OpCompositeExtract %f %t115 1
+%t191 = OpIAdd %u %t4 %cu40
+%t192 = OpAccessChain %pf %outb %cu0 %t191
+OpStore %t192 %t190
+%t193 = OpCompositeExtract %f %t116 0
+%t194 = OpIAdd %u %t4 %cu41
+%t195 = OpAccessChain %pf %outb %cu0 %t194
+OpStore %t195 %t193
+%t196 = OpCompositeExtract %f %t116 1
+%t197 = OpIAdd %u %t4 %cu42
+%t198 = OpAccessChain %pf %outb %cu0 %t197
+OpStore %t198 %t196
+%t199 = OpCompositeExtract %f %t117 0
+%t200 = OpIAdd %u %t4 %cu43
+%t201 = OpAccessChain %pf %outb %cu0 %t200
+OpStore %t201 %t199
+%t202 = OpCompositeExtract %f %t117 1
+%t203 = OpIAdd %u %t4 %cu44
+%t204 = OpAccessChain %pf %outb %cu0 %t203
+OpStore %t204 %t202
+%t205 = OpCompositeExtract %f %t118 0
+%t206 = OpIAdd %u %t4 %cu45
+%t207 = OpAccessChain %pf %outb %cu0 %t206
+OpStore %t207 %t205
+%t208 = OpCompositeExtract %f %t118 1
+%t209 = OpIAdd %u %t4 %cu46
+%t210 = OpAccessChain %pf %outb %cu0 %t209
+OpStore %t210 %t208
+%t211 = OpCompositeExtract %f %t119 0
+%t212 = OpIAdd %u %t4 %cu47
+%t213 = OpAccessChain %pf %outb %cu0 %t212
+OpStore %t213 %t211
+%t214 = OpCompositeExtract %f %t119 1
+%t215 = OpIAdd %u %t4 %cu48
+%t216 = OpAccessChain %pf %outb %cu0 %t215
+OpStore %t216 %t214
+%t217 = OpCompositeExtract %f %t120 0
+%t218 = OpIAdd %u %t4 %cu49
+%t219 = OpAccessChain %pf %outb %cu0 %t218
+OpStore %t219 %t217
+%t220 = OpCompositeExtract %f %t120 1
+%t221 = OpIAdd %u %t4 %cu50
+%t222 = OpAccessChain %pf %outb %cu0 %t221
+OpStore %t222 %t220
+%t223 = OpExtInst %v3 %glsl Round %t101
+%t224 = OpExtInst %v3 %glsl Tan %t101
+%t225 = OpExtInst %v3 %glsl Asin %t101
+%t226 = OpExtInst %v3 %glsl Acos %t101
+%t227 = OpExtInst %v3 %glsl Atan %t101
+%t228 = OpExtInst %v3 %glsl Atan2 %t101 %t102
+%t229 = OpExtInst %v3 %glsl Sinh %t101
+%t230 = OpExtInst %v3 %glsl Cosh %t101
+%t231 = OpExtInst %v3 %glsl Tanh %t101
+%t232 = OpExtInst %v3 %glsl Asinh %t101
+%t233 = OpExtInst %v3 %glsl Acosh %t101
+%t234 = OpExtInst %v3 %glsl Atanh %t101
+%t235 = OpExtInst %v3 %glsl Radians %t101
+%t236 = OpExtInst %v3 %glsl Degrees %t101
+%t237 = OpExtInst %v3 %glsl FMix %t101 %t102 %t103
+%t238 = OpExtInst %v3 %glsl Step %t101 %t102
+%t239 = OpExtInst %v3 %glsl SmoothStep %t101 %t102 %t103
+%t240 = OpCompositeExtract %f %t223 0
+%t241 = OpIAdd %u %t4 %cu51
+%t242 = OpAccessChain %pf %outb %cu0 %t241
+OpStore %t242 %t240
+%t243 = OpCompositeExtract %f %t223 1
+%t244 = OpIAdd %u %t4 %cu52
+%t245 = OpAccessChain %pf %outb %cu0 %t244
+OpStore %t245 %t243
+%t246 = OpCompositeExtract %f %t223 2
+%t247 = OpIAdd %u %t4 %cu53
+%t248 = OpAccessChain %pf %outb %cu0 %t247
+OpStore %t248 %t246
+%t249 = OpCompositeExtract %f %t224 0
+%t250 = OpIAdd %u %t4 %cu54
+%t251 = OpAccessChain %pf %outb %cu0 %t250
+OpStore %t251 %t249
+%t252 = OpCompositeExtract %f %t224 1
+%t253 = OpIAdd %u %t4 %cu55
+%t254 = OpAccessChain %pf %outb %cu0 %t253
+OpStore %t254 %t252
+%t255 = OpCompositeExtract %f %t224 2
+%t256 = OpIAdd %u %t4 %cu56
+%t257 = OpAccessChain %pf %outb %cu0 %t256
+OpStore %t257 %t255
+%t258 = OpCompositeExtract %f %t225 0
+%t259 = OpIAdd %u %t4 %cu57
+%t260 = OpAccessChain %pf %outb %cu0 %t259
+OpStore %t260 %t258
+%t261 = OpCompositeExtract %f %t225 1
+%t262 = OpIAdd %u %t4 %cu58
+%t263 = OpAccessChain %pf %outb %cu0 %t262
+OpStore %t263 %t261
+%t264 = OpCompositeExtract %f %t225 2
+%t265 = OpIAdd %u %t4 %cu59
+%t266 = OpAccessChain %pf %outb %cu0 %t265
+OpStore %t266 %t264
+%t267 = OpCompositeExtract %f %t226 0
+%t268 = OpIAdd %u %t4 %cu60
+%t269 = OpAccessChain %pf %outb %cu0 %t268
+OpStore %t269 %t267
+%t270 = OpCompositeExtract %f %t226 1
+%t271 = OpIAdd %u %t4 %cu61
+%t272 = OpAccessChain %pf %outb %cu0 %t271
+OpStore %t272 %t270
+%t273 = OpCompositeExtract %f %t226 2
+%t274 = OpIAdd %u %t4 %cu62
+%t275 = OpAccessChain %pf %outb %cu0 %t274
+OpStore %t275 %t273
+%t276 = OpCompositeExtract %f %t227 0
+%t277 = OpIAdd %u %t4 %cu63
+%t278 = OpAccessChain %pf %outb %cu0 %t277
+OpStore %t278 %t276
+%t279 = OpCompositeExtract %f %t227 1
+%t280 = OpIAdd %u %t4 %cu64
+%t281 = OpAccessChain %pf %outb %cu0 %t280
+OpStore %t281 %t279
+%t282 = OpCompositeExtract %f %t227 2
+%t283 = OpIAdd %u %t4 %cu65
+%t284 = OpAccessChain %pf %outb %cu0 %t283
+OpStore %t284 %t282
+%t285 = OpCompositeExtract %f %t228 0
+%t286 = OpIAdd %u %t4 %cu66
+%t287 = OpAccessChain %pf %outb %cu0 %t286
+OpStore %t287 %t285
+%t288 = OpCompositeExtract %f %t228 1
+%t289 = OpIAdd %u %t4 %cu67
+%t290 = OpAccessChain %pf %outb %cu0 %t289
+OpStore %t290 %t288
+%t291 = OpCompositeExtract %f %t228 2
+%t292 = OpIAdd %u %t4 %cu68
+%t293 = OpAccessChain %pf %outb %cu0 %t292
+OpStore %t293 %t291
+%t294 = OpCompositeExtract %f %t229 0
+%t295 = OpIAdd %u %t4 %cu69
+%t296 = OpAccessChain %pf %outb %cu0 %t295
+OpStore %t296 %t294
+%t297 = OpCompositeExtract %f %t229 1
+%t298 = OpIAdd %u %t4 %cu70
+%t299 = OpAccessChain %pf %outb %cu0 %t298
+OpStore %t299 %t297
+%t300 = OpCompositeExtract %f %t229 2
+%t301 = OpIAdd %u %t4 %cu71
+%t302 = OpAccessChain %pf %outb %cu0 %t301
+OpStore %t302 %t300
+%t303 = OpCompositeExtract %f %t230 0
+%t304 = OpIAdd %u %t4 %cu72
+%t305 = OpAccessChain %pf %outb %cu0 %t304
+OpStore %t305 %t303
+%t306 = OpCompositeExtract %f %t230 1
+%t307 = OpIAdd %u %t4 %cu73
+%t308 = OpAccessChain %pf %outb %cu0 %t307
+OpStore %t308 %t306
+%t309 = OpCompositeExtract %f %t230 2
+%t310 = OpIAdd %u %t4 %cu74
+%t311 = OpAccessChain %pf %outb %cu0 %t310
+OpStore %t311 %t309
+%t312 = OpCompositeExtract %f %t231 0
+%t313 = OpIAdd %u %t4 %cu75
+%t314 = OpAccessChain %pf %outb %cu0 %t313
+OpStore %t314 %t312
+%t315 = OpCompositeExtract %f %t231 1
+%t316 = OpIAdd %u %t4 %cu76
+%t317 = OpAccessChain %pf %outb %cu0 %t316
+OpStore %t317 %t315
+%t318 = OpCompositeExtract %f %t231 2
+%t319 = OpIAdd %u %t4 %cu77
+%t320 = OpAccessChain %pf %outb %cu0 %t319
+OpStore %t320 %t318
+%t321 = OpCompositeExtract %f %t232 0
+%t322 = OpIAdd %u %t4 %cu78
+%t323 = OpAccessChain %pf %outb %cu0 %t322
+OpStore %t323 %t321
+%t324 = OpCompositeExtract %f %t232 1
+%t325 = OpIAdd %u %t4 %cu79
+%t326 = OpAccessChain %pf %outb %cu0 %t325
+OpStore %t326 %t324
+%t327 = OpCompositeExtract %f %t232 2
+%t328 = OpIAdd %u %t4 %cu80
+%t329 = OpAccessChain %pf %outb %cu0 %t328
+OpStore %t329 %t327
+%t330 = OpCompositeExtract %f %t233 0
+%t331 = OpIAdd %u %t4 %cu81
+%t332 = OpAccessChain %pf %outb %cu0 %t331
+OpStore %t332 %t330
+%t333 = OpCompositeExtract %f %t233 1
+%t334 = OpIAdd %u %t4 %cu82
+%t335 = OpAccessChain %pf %outb %cu0 %t334
+OpStore %t335 %t333
+%t336 = OpCompositeExtract %f %t233 2
+%t337 = OpIAdd %u %t4 %cu83
+%t338 = OpAccessChain %pf %outb %cu0 %t337
+OpStore %t338 %t336
+%t339 = OpCompositeExtract %f %t234 0
+%t340 = OpIAdd %u %t4 %cu84
+%t341 = OpAccessChain %pf %outb %cu0 %t340
+OpStore %t341 %t339
+%t342 = OpCompositeExtract %f %t234 1
+%t343 = OpIAdd %u %t4 %cu85
+%t344 = OpAccessChain %pf %outb %cu0 %t343
+OpStore %t344 %t342
+%t345 = OpCompositeExtract %f %t234 2
+%t346 = OpIAdd %u %t4 %cu86
+%t347 = OpAccessChain %pf %outb %cu0 %t346
+OpStore %t347 %t345
+%t348 = OpCompositeExtract %f %t235 0
+%t349 = OpIAdd %u %t4 %cu87
+%t350 = OpAccessChain %pf %outb %cu0 %t349
+OpStore %t350 %t348
+%t351 = OpCompositeExtract %f %t235 1
+%t352 = OpIAdd %u %t4 %cu88
+%t353 = OpAccessChain %pf %outb %cu0 %t352
+OpStore %t353 %t351
+%t354 = OpCompositeExtract %f %t235 2
+%t355 = OpIAdd %u %t4 %cu89
+%t356 = OpAccessChain %pf %outb %cu0 %t355
+OpStore %t356 %t354
+%t357 = OpCompositeExtract %f %t236 0
+%t358 = OpIAdd %u %t4 %cu90
+%t359 = OpAccessChain %pf %outb %cu0 %t358
+OpStore %t359 %t357
+%t360 = OpCompositeExtract %f %t236 1
+%t361 = OpIAdd %u %t4 %cu91
+%t362 = OpAccessChain %pf %outb %cu0 %t361
+OpStore %t362 %t360
+%t363 = OpCompositeExtract %f %t236 2
+%t364 = OpIAdd %u %t4 %cu92
+%t365 = OpAccessChain %pf %outb %cu0 %t364
+OpStore %t365 %t363
+%t366 = OpCompositeExtract %f %t237 0
+%t367 = OpIAdd %u %t4 %cu93
+%t368 = OpAccessChain %pf %outb %cu0 %t367
+OpStore %t368 %t366
+%t369 = OpCompositeExtract %f %t237 1
+%t370 = OpIAdd %u %t4 %cu94
+%t371 = OpAccessChain %pf %outb %cu0 %t370
+OpStore %t371 %t369
+%t372 = OpCompositeExtract %f %t237 2
+%t373 = OpIAdd %u %t4 %cu95
+%t374 = OpAccessChain %pf %outb %cu0 %t373
+OpStore %t374 %t372
+%t375 = OpCompositeExtract %f %t238 0
+%t376 = OpIAdd %u %t4 %cu96
+%t377 = OpAccessChain %pf %outb %cu0 %t376
+OpStore %t377 %t375
+%t378 = OpCompositeExtract %f %t238 1
+%t379 = OpIAdd %u %t4 %cu97
+%t380 = OpAccessChain %pf %outb %cu0 %t379
+OpStore %t380 %t378
+%t381 = OpCompositeExtract %f %t238 2
+%t382 = OpIAdd %u %t4 %cu98
+%t383 = OpAccessChain %pf %outb %cu0 %t382
+OpStore %t383 %t381
+%t384 = OpCompositeExtract %f %t239 0
+%t385 = OpIAdd %u %t4 %cu99
+%t386 = OpAccessChain %pf %outb %cu0 %t385
+OpStore %t386 %t384
+%t387 = OpCompositeExtract %f %t239 1
+%t388 = OpIAdd %u %t4 %cu100
+%t389 = OpAccessChain %pf %outb %cu0 %t388
+OpStore %t389 %t387
+%t390 = OpCompositeExtract %f %t239 2
+%t391 = OpIAdd %u %t4 %cu101
+%t392 = OpAccessChain %pf %outb %cu0 %t391
+OpStore %t392 %t390
+%t393 = OpExtInst %v4 %glsl Round %t41
+%t394 = OpExtInst %v4 %glsl Tan %t41
+%t395 = OpExtInst %v4 %glsl Asin %t41
+%t396 = OpExtInst %v4 %glsl Acos %t41
+%t397 = OpExtInst %v4 %glsl Atan %t41
+%t398 = OpExtInst %v4 %glsl Atan2 %t41 %t42
+%t399 = OpExtInst %v4 %glsl Sinh %t41
+%t400 = OpExtInst %v4 %glsl Cosh %t41
+%t401 = OpExtInst %v4 %glsl Tanh %t41
+%t402 = OpExtInst %v4 %glsl Asinh %t41
+%t403 = OpExtInst %v4 %glsl Acosh %t41
+%t404 = OpExtInst %v4 %glsl Atanh %t41
+%t405 = OpExtInst %v4 %glsl Radians %t41
+%t406 = OpExtInst %v4 %glsl Degrees %t41
+%t407 = OpExtInst %v4 %glsl FMix %t41 %t42 %t43
+%t408 = OpExtInst %v4 %glsl Step %t41 %t42
+%t409 = OpExtInst %v4 %glsl SmoothStep %t41 %t42 %t43
+%t410 = OpCompositeExtract %f %t393 0
+%t411 = OpIAdd %u %t4 %cu102
+%t412 = OpAccessChain %pf %outb %cu0 %t411
+OpStore %t412 %t410
+%t413 = OpCompositeExtract %f %t393 1
+%t414 = OpIAdd %u %t4 %cu103
+%t415 = OpAccessChain %pf %outb %cu0 %t414
+OpStore %t415 %t413
+%t416 = OpCompositeExtract %f %t393 2
+%t417 = OpIAdd %u %t4 %cu104
+%t418 = OpAccessChain %pf %outb %cu0 %t417
+OpStore %t418 %t416
+%t419 = OpCompositeExtract %f %t393 3
+%t420 = OpIAdd %u %t4 %cu105
+%t421 = OpAccessChain %pf %outb %cu0 %t420
+OpStore %t421 %t419
+%t422 = OpCompositeExtract %f %t394 0
+%t423 = OpIAdd %u %t4 %cu106
+%t424 = OpAccessChain %pf %outb %cu0 %t423
+OpStore %t424 %t422
+%t425 = OpCompositeExtract %f %t394 1
+%t426 = OpIAdd %u %t4 %cu107
+%t427 = OpAccessChain %pf %outb %cu0 %t426
+OpStore %t427 %t425
+%t428 = OpCompositeExtract %f %t394 2
+%t429 = OpIAdd %u %t4 %cu108
+%t430 = OpAccessChain %pf %outb %cu0 %t429
+OpStore %t430 %t428
+%t431 = OpCompositeExtract %f %t394 3
+%t432 = OpIAdd %u %t4 %cu109
+%t433 = OpAccessChain %pf %outb %cu0 %t432
+OpStore %t433 %t431
+%t434 = OpCompositeExtract %f %t395 0
+%t435 = OpIAdd %u %t4 %cu110
+%t436 = OpAccessChain %pf %outb %cu0 %t435
+OpStore %t436 %t434
+%t437 = OpCompositeExtract %f %t395 1
+%t438 = OpIAdd %u %t4 %cu111
+%t439 = OpAccessChain %pf %outb %cu0 %t438
+OpStore %t439 %t437
+%t440 = OpCompositeExtract %f %t395 2
+%t441 = OpIAdd %u %t4 %cu112
+%t442 = OpAccessChain %pf %outb %cu0 %t441
+OpStore %t442 %t440
+%t443 = OpCompositeExtract %f %t395 3
+%t444 = OpIAdd %u %t4 %cu113
+%t445 = OpAccessChain %pf %outb %cu0 %t444
+OpStore %t445 %t443
+%t446 = OpCompositeExtract %f %t396 0
+%t447 = OpIAdd %u %t4 %cu114
+%t448 = OpAccessChain %pf %outb %cu0 %t447
+OpStore %t448 %t446
+%t449 = OpCompositeExtract %f %t396 1
+%t450 = OpIAdd %u %t4 %cu115
+%t451 = OpAccessChain %pf %outb %cu0 %t450
+OpStore %t451 %t449
+%t452 = OpCompositeExtract %f %t396 2
+%t453 = OpIAdd %u %t4 %cu116
+%t454 = OpAccessChain %pf %outb %cu0 %t453
+OpStore %t454 %t452
+%t455 = OpCompositeExtract %f %t396 3
+%t456 = OpIAdd %u %t4 %cu117
+%t457 = OpAccessChain %pf %outb %cu0 %t456
+OpStore %t457 %t455
+%t458 = OpCompositeExtract %f %t397 0
+%t459 = OpIAdd %u %t4 %cu118
+%t460 = OpAccessChain %pf %outb %cu0 %t459
+OpStore %t460 %t458
+%t461 = OpCompositeExtract %f %t397 1
+%t462 = OpIAdd %u %t4 %cu119
+%t463 = OpAccessChain %pf %outb %cu0 %t462
+OpStore %t463 %t461
+%t464 = OpCompositeExtract %f %t397 2
+%t465 = OpIAdd %u %t4 %cu120
+%t466 = OpAccessChain %pf %outb %cu0 %t465
+OpStore %t466 %t464
+%t467 = OpCompositeExtract %f %t397 3
+%t468 = OpIAdd %u %t4 %cu121
+%t469 = OpAccessChain %pf %outb %cu0 %t468
+OpStore %t469 %t467
+%t470 = OpCompositeExtract %f %t398 0
+%t471 = OpIAdd %u %t4 %cu122
+%t472 = OpAccessChain %pf %outb %cu0 %t471
+OpStore %t472 %t470
+%t473 = OpCompositeExtract %f %t398 1
+%t474 = OpIAdd %u %t4 %cu123
+%t475 = OpAccessChain %pf %outb %cu0 %t474
+OpStore %t475 %t473
+%t476 = OpCompositeExtract %f %t398 2
+%t477 = OpIAdd %u %t4 %cu124
+%t478 = OpAccessChain %pf %outb %cu0 %t477
+OpStore %t478 %t476
+%t479 = OpCompositeExtract %f %t398 3
+%t480 = OpIAdd %u %t4 %cu125
+%t481 = OpAccessChain %pf %outb %cu0 %t480
+OpStore %t481 %t479
+%t482 = OpCompositeExtract %f %t399 0
+%t483 = OpIAdd %u %t4 %cu126
+%t484 = OpAccessChain %pf %outb %cu0 %t483
+OpStore %t484 %t482
+%t485 = OpCompositeExtract %f %t399 1
+%t486 = OpIAdd %u %t4 %cu127
+%t487 = OpAccessChain %pf %outb %cu0 %t486
+OpStore %t487 %t485
+%t488 = OpCompositeExtract %f %t399 2
+%t489 = OpIAdd %u %t4 %cu128
+%t490 = OpAccessChain %pf %outb %cu0 %t489
+OpStore %t490 %t488
+%t491 = OpCompositeExtract %f %t399 3
+%t492 = OpIAdd %u %t4 %cu129
+%t493 = OpAccessChain %pf %outb %cu0 %t492
+OpStore %t493 %t491
+%t494 = OpCompositeExtract %f %t400 0
+%t495 = OpIAdd %u %t4 %cu130
+%t496 = OpAccessChain %pf %outb %cu0 %t495
+OpStore %t496 %t494
+%t497 = OpCompositeExtract %f %t400 1
+%t498 = OpIAdd %u %t4 %cu131
+%t499 = OpAccessChain %pf %outb %cu0 %t498
+OpStore %t499 %t497
+%t500 = OpCompositeExtract %f %t400 2
+%t501 = OpIAdd %u %t4 %cu132
+%t502 = OpAccessChain %pf %outb %cu0 %t501
+OpStore %t502 %t500
+%t503 = OpCompositeExtract %f %t400 3
+%t504 = OpIAdd %u %t4 %cu133
+%t505 = OpAccessChain %pf %outb %cu0 %t504
+OpStore %t505 %t503
+%t506 = OpCompositeExtract %f %t401 0
+%t507 = OpIAdd %u %t4 %cu134
+%t508 = OpAccessChain %pf %outb %cu0 %t507
+OpStore %t508 %t506
+%t509 = OpCompositeExtract %f %t401 1
+%t510 = OpIAdd %u %t4 %cu135
+%t511 = OpAccessChain %pf %outb %cu0 %t510
+OpStore %t511 %t509
+%t512 = OpCompositeExtract %f %t401 2
+%t513 = OpIAdd %u %t4 %cu136
+%t514 = OpAccessChain %pf %outb %cu0 %t513
+OpStore %t514 %t512
+%t515 = OpCompositeExtract %f %t401 3
+%t516 = OpIAdd %u %t4 %cu137
+%t517 = OpAccessChain %pf %outb %cu0 %t516
+OpStore %t517 %t515
+%t518 = OpCompositeExtract %f %t402 0
+%t519 = OpIAdd %u %t4 %cu138
+%t520 = OpAccessChain %pf %outb %cu0 %t519
+OpStore %t520 %t518
+%t521 = OpCompositeExtract %f %t402 1
+%t522 = OpIAdd %u %t4 %cu139
+%t523 = OpAccessChain %pf %outb %cu0 %t522
+OpStore %t523 %t521
+%t524 = OpCompositeExtract %f %t402 2
+%t525 = OpIAdd %u %t4 %cu140
+%t526 = OpAccessChain %pf %outb %cu0 %t525
+OpStore %t526 %t524
+%t527 = OpCompositeExtract %f %t402 3
+%t528 = OpIAdd %u %t4 %cu141
+%t529 = OpAccessChain %pf %outb %cu0 %t528
+OpStore %t529 %t527
+%t530 = OpCompositeExtract %f %t403 0
+%t531 = OpIAdd %u %t4 %cu142
+%t532 = OpAccessChain %pf %outb %cu0 %t531
+OpStore %t532 %t530
+%t533 = OpCompositeExtract %f %t403 1
+%t534 = OpIAdd %u %t4 %cu143
+%t535 = OpAccessChain %pf %outb %cu0 %t534
+OpStore %t535 %t533
+%t536 = OpCompositeExtract %f %t403 2
+%t537 = OpIAdd %u %t4 %cu144
+%t538 = OpAccessChain %pf %outb %cu0 %t537
+OpStore %t538 %t536
+%t539 = OpCompositeExtract %f %t403 3
+%t540 = OpIAdd %u %t4 %cu145
+%t541 = OpAccessChain %pf %outb %cu0 %t540
+OpStore %t541 %t539
+%t542 = OpCompositeExtract %f %t404 0
+%t543 = OpIAdd %u %t4 %cu146
+%t544 = OpAccessChain %pf %outb %cu0 %t543
+OpStore %t544 %t542
+%t545 = OpCompositeExtract %f %t404 1
+%t546 = OpIAdd %u %t4 %cu147
+%t547 = OpAccessChain %pf %outb %cu0 %t546
+OpStore %t547 %t545
+%t548 = OpCompositeExtract %f %t404 2
+%t549 = OpIAdd %u %t4 %cu148
+%t550 = OpAccessChain %pf %outb %cu0 %t549
+OpStore %t550 %t548
+%t551 = OpCompositeExtract %f %t404 3
+%t552 = OpIAdd %u %t4 %cu149
+%t553 = OpAccessChain %pf %outb %cu0 %t552
+OpStore %t553 %t551
+%t554 = OpCompositeExtract %f %t405 0
+%t555 = OpIAdd %u %t4 %cu150
+%t556 = OpAccessChain %pf %outb %cu0 %t555
+OpStore %t556 %t554
+%t557 = OpCompositeExtract %f %t405 1
+%t558 = OpIAdd %u %t4 %cu151
+%t559 = OpAccessChain %pf %outb %cu0 %t558
+OpStore %t559 %t557
+%t560 = OpCompositeExtract %f %t405 2
+%t561 = OpIAdd %u %t4 %cu152
+%t562 = OpAccessChain %pf %outb %cu0 %t561
+OpStore %t562 %t560
+%t563 = OpCompositeExtract %f %t405 3
+%t564 = OpIAdd %u %t4 %cu153
+%t565 = OpAccessChain %pf %outb %cu0 %t564
+OpStore %t565 %t563
+%t566 = OpCompositeExtract %f %t406 0
+%t567 = OpIAdd %u %t4 %cu154
+%t568 = OpAccessChain %pf %outb %cu0 %t567
+OpStore %t568 %t566
+%t569 = OpCompositeExtract %f %t406 1
+%t570 = OpIAdd %u %t4 %cu155
+%t571 = OpAccessChain %pf %outb %cu0 %t570
+OpStore %t571 %t569
+%t572 = OpCompositeExtract %f %t406 2
+%t573 = OpIAdd %u %t4 %cu156
+%t574 = OpAccessChain %pf %outb %cu0 %t573
+OpStore %t574 %t572
+%t575 = OpCompositeExtract %f %t406 3
+%t576 = OpIAdd %u %t4 %cu157
+%t577 = OpAccessChain %pf %outb %cu0 %t576
+OpStore %t577 %t575
+%t578 = OpCompositeExtract %f %t407 0
+%t579 = OpIAdd %u %t4 %cu158
+%t580 = OpAccessChain %pf %outb %cu0 %t579
+OpStore %t580 %t578
+%t581 = OpCompositeExtract %f %t407 1
+%t582 = OpIAdd %u %t4 %cu159
+%t583 = OpAccessChain %pf %outb %cu0 %t582
+OpStore %t583 %t581
+%t584 = OpCompositeExtract %f %t407 2
+%t585 = OpIAdd %u %t4 %cu160
+%t586 = OpAccessChain %pf %outb %cu0 %t585
+OpStore %t586 %t584
+%t587 = OpCompositeExtract %f %t407 3
+%t588 = OpIAdd %u %t4 %cu161
+%t589 = OpAccessChain %pf %outb %cu0 %t588
+OpStore %t589 %t587
+%t590 = OpCompositeExtract %f %t408 0
+%t591 = OpIAdd %u %t4 %cu162
+%t592 = OpAccessChain %pf %outb %cu0 %t591
+OpStore %t592 %t590
+%t593 = OpCompositeExtract %f %t408 1
+%t594 = OpIAdd %u %t4 %cu163
+%t595 = OpAccessChain %pf %outb %cu0 %t594
+OpStore %t595 %t593
+%t596 = OpCompositeExtract %f %t408 2
+%t597 = OpIAdd %u %t4 %cu164
+%t598 = OpAccessChain %pf %outb %cu0 %t597
+OpStore %t598 %t596
+%t599 = OpCompositeExtract %f %t408 3
+%t600 = OpIAdd %u %t4 %cu165
+%t601 = OpAccessChain %pf %outb %cu0 %t600
+OpStore %t601 %t599
+%t602 = OpCompositeExtract %f %t409 0
+%t603 = OpIAdd %u %t4 %cu166
+%t604 = OpAccessChain %pf %outb %cu0 %t603
+OpStore %t604 %t602
+%t605 = OpCompositeExtract %f %t409 1
+%t606 = OpIAdd %u %t4 %cu167
+%t607 = OpAccessChain %pf %outb %cu0 %t606
+OpStore %t607 %t605
+%t608 = OpCompositeExtract %f %t409 2
+%t609 = OpIAdd %u %t4 %cu168
+%t610 = OpAccessChain %pf %outb %cu0 %t609
+OpStore %t610 %t608
+%t611 = OpCompositeExtract %f %t409 3
+%t612 = OpIAdd %u %t4 %cu169
+%t613 = OpAccessChain %pf %outb %cu0 %t612
+OpStore %t613 %t611
+%t614 = OpExtInst %f %glsl Length %t98
+%t615 = OpExtInst %f %glsl Distance %t98 %t99
+%t616 = OpExtInst %v2 %glsl Normalize %t98
+%t617 = OpExtInst %v2 %glsl FaceForward %t98 %t99 %t100
+%t618 = OpExtInst %v2 %glsl Reflect %t98 %t99
+%t619 = OpExtInst %v2 %glsl Refract %t98 %t99 %t46
+%t620 = OpIAdd %u %t4 %cu170
+%t621 = OpAccessChain %pf %outb %cu0 %t620
+OpStore %t621 %t614
+%t622 = OpIAdd %u %t4 %cu171
+%t623 = OpAccessChain %pf %outb %cu0 %t622
+OpStore %t623 %t615
+%t624 = OpCompositeExtract %f %t616 0
+%t625 = OpIAdd %u %t4 %cu172
+%t626 = OpAccessChain %pf %outb %cu0 %t625
+OpStore %t626 %t624
+%t627 = OpCompositeExtract %f %t616 1
+%t628 = OpIAdd %u %t4 %cu173
+%t629 = OpAccessChain %pf %outb %cu0 %t628
+OpStore %t629 %t627
+%t630 = OpCompositeExtract %f %t617 0
+%t631 = OpIAdd %u %t4 %cu174
+%t632 = OpAccessChain %pf %outb %cu0 %t631
+OpStore %t632 %t630
+%t633 = OpCompositeExtract %f %t617 1
+%t634 = OpIAdd %u %t4 %cu175
+%t635 = OpAccessChain %pf %outb %cu0 %t634
+OpStore %t635 %t633
+%t636 = OpCompositeExtract %f %t618 0
+%t637 = OpIAdd %u %t4 %cu176
+%t638 = OpAccessChain %pf %outb %cu0 %t637
+OpStore %t638 %t636
+%t639 = OpCompositeExtract %f %t618 1
+%t640 = OpIAdd %u %t4 %cu177
+%t641 = OpAccessChain %pf %outb %cu0 %t640
+OpStore %t641 %t639
+%t642 = OpCompositeExtract %f %t619 0
+%t643 = OpIAdd %u %t4 %cu178
+%t644 = OpAccessChain %pf %outb %cu0 %t643
+OpStore %t644 %t642
+%t645 = OpCompositeExtract %f %t619 1
+%t646 = OpIAdd %u %t4 %cu179
+%t647 = OpAccessChain %pf %outb %cu0 %t646
+OpStore %t647 %t645
+%t648 = OpExtInst %f %glsl Length %t101
+%t649 = OpExtInst %f %glsl Distance %t101 %t102
+%t650 = OpExtInst %v3 %glsl Normalize %t101
+%t651 = OpExtInst %v3 %glsl FaceForward %t101 %t102 %t103
+%t652 = OpExtInst %v3 %glsl Reflect %t101 %t102
+%t653 = OpExtInst %v3 %glsl Refract %t101 %t102 %t46
+%t654 = OpIAdd %u %t4 %cu180
+%t655 = OpAccessChain %pf %outb %cu0 %t654
+OpStore %t655 %t648
+%t656 = OpIAdd %u %t4 %cu181
+%t657 = OpAccessChain %pf %outb %cu0 %t656
+OpStore %t657 %t649
+%t658 = OpCompositeExtract %f %t650 0
+%t659 = OpIAdd %u %t4 %cu182
+%t660 = OpAccessChain %pf %outb %cu0 %t659
+OpStore %t660 %t658
+%t661 = OpCompositeExtract %f %t650 1
+%t662 = OpIAdd %u %t4 %cu183
+%t663 = OpAccessChain %pf %outb %cu0 %t662
+OpStore %t663 %t661
+%t664 = OpCompositeExtract %f %t650 2
+%t665 = OpIAdd %u %t4 %cu184
+%t666 = OpAccessChain %pf %outb %cu0 %t665
+OpStore %t666 %t664
+%t667 = OpCompositeExtract %f %t651 0
+%t668 = OpIAdd %u %t4 %cu185
+%t669 = OpAccessChain %pf %outb %cu0 %t668
+OpStore %t669 %t667
+%t670 = OpCompositeExtract %f %t651 1
+%t671 = OpIAdd %u %t4 %cu186
+%t672 = OpAccessChain %pf %outb %cu0 %t671
+OpStore %t672 %t670
+%t673 = OpCompositeExtract %f %t651 2
+%t674 = OpIAdd %u %t4 %cu187
+%t675 = OpAccessChain %pf %outb %cu0 %t674
+OpStore %t675 %t673
+%t676 = OpCompositeExtract %f %t652 0
+%t677 = OpIAdd %u %t4 %cu188
+%t678 = OpAccessChain %pf %outb %cu0 %t677
+OpStore %t678 %t676
+%t679 = OpCompositeExtract %f %t652 1
+%t680 = OpIAdd %u %t4 %cu189
+%t681 = OpAccessChain %pf %outb %cu0 %t680
+OpStore %t681 %t679
+%t682 = OpCompositeExtract %f %t652 2
+%t683 = OpIAdd %u %t4 %cu190
+%t684 = OpAccessChain %pf %outb %cu0 %t683
+OpStore %t684 %t682
+%t685 = OpCompositeExtract %f %t653 0
+%t686 = OpIAdd %u %t4 %cu191
+%t687 = OpAccessChain %pf %outb %cu0 %t686
+OpStore %t687 %t685
+%t688 = OpCompositeExtract %f %t653 1
+%t689 = OpIAdd %u %t4 %cu192
+%t690 = OpAccessChain %pf %outb %cu0 %t689
+OpStore %t690 %t688
+%t691 = OpCompositeExtract %f %t653 2
+%t692 = OpIAdd %u %t4 %cu193
+%t693 = OpAccessChain %pf %outb %cu0 %t692
+OpStore %t693 %t691
+%t694 = OpExtInst %f %glsl Length %t41
+%t695 = OpExtInst %f %glsl Distance %t41 %t42
+%t696 = OpExtInst %v4 %glsl Normalize %t41
+%t697 = OpExtInst %v4 %glsl FaceForward %t41 %t42 %t43
+%t698 = OpExtInst %v4 %glsl Reflect %t41 %t42
+%t699 = OpExtInst %v4 %glsl Refract %t41 %t42 %t46
+%t700 = OpIAdd %u %t4 %cu194
+%t701 = OpAccessChain %pf %outb %cu0 %t700
+OpStore %t701 %t694
+%t702 = OpIAdd %u %t4 %cu195
+%t703 = OpAccessChain %pf %outb %cu0 %t702
+OpStore %t703 %t695
+%t704 = OpCompositeExtract %f %t696 0
+%t705 = OpIAdd %u %t4 %cu196
+%t706 = OpAccessChain %pf %outb %cu0 %t705
+OpStore %t706 %t704
+%t707 = OpCompositeExtract %f %t696 1
+%t708 = OpIAdd %u %t4 %cu197
+%t709 = OpAccessChain %pf %outb %cu0 %t708
+OpStore %t709 %t707
+%t710 = OpCompositeExtract %f %t696 2
+%t711 = OpIAdd %u %t4 %cu198
+%t712 = OpAccessChain %pf %outb %cu0 %t711
+OpStore %t712 %t710
+%t713 = OpCompositeExtract %f %t696 3
+%t714 = OpIAdd %u %t4 %cu199
+%t715 = OpAccessChain %pf %outb %cu0 %t714
+OpStore %t715 %t713
+%t716 = OpCompositeExtract %f %t697 0
+%t717 = OpIAdd %u %t4 %cu200
+%t718 = OpAccessChain %pf %outb %cu0 %t717
+OpStore %t718 %t716
+%t719 = OpCompositeExtract %f %t697 1
+%t720 = OpIAdd %u %t4 %cu201
+%t721 = OpAccessChain %pf %outb %cu0 %t720
+OpStore %t721 %t719
+%t722 = OpCompositeExtract %f %t697 2
+%t723 = OpIAdd %u %t4 %cu202
+%t724 = OpAccessChain %pf %outb %cu0 %t723
+OpStore %t724 %t722
+%t725 = OpCompositeExtract %f %t697 3
+%t726 = OpIAdd %u %t4 %cu203
+%t727 = OpAccessChain %pf %outb %cu0 %t726
+OpStore %t727 %t725
+%t728 = OpCompositeExtract %f %t698 0
+%t729 = OpIAdd %u %t4 %cu204
+%t730 = OpAccessChain %pf %outb %cu0 %t729
+OpStore %t730 %t728
+%t731 = OpCompositeExtract %f %t698 1
+%t732 = OpIAdd %u %t4 %cu205
+%t733 = OpAccessChain %pf %outb %cu0 %t732
+OpStore %t733 %t731
+%t734 = OpCompositeExtract %f %t698 2
+%t735 = OpIAdd %u %t4 %cu206
+%t736 = OpAccessChain %pf %outb %cu0 %t735
+OpStore %t736 %t734
+%t737 = OpCompositeExtract %f %t698 3
+%t738 = OpIAdd %u %t4 %cu207
+%t739 = OpAccessChain %pf %outb %cu0 %t738
+OpStore %t739 %t737
+%t740 = OpCompositeExtract %f %t699 0
+%t741 = OpIAdd %u %t4 %cu208
+%t742 = OpAccessChain %pf %outb %cu0 %t741
+OpStore %t742 %t740
+%t743 = OpCompositeExtract %f %t699 1
+%t744 = OpIAdd %u %t4 %cu209
+%t745 = OpAccessChain %pf %outb %cu0 %t744
+OpStore %t745 %t743
+%t746 = OpCompositeExtract %f %t699 2
+%t747 = OpIAdd %u %t4 %cu210
+%t748 = OpAccessChain %pf %outb %cu0 %t747
+OpStore %t748 %t746
+%t749 = OpCompositeExtract %f %t699 3
+%t750 = OpIAdd %u %t4 %cu211
+%t751 = OpAccessChain %pf %outb %cu0 %t750
+OpStore %t751 %t749
+%t752 = OpExtInst %v3 %glsl Cross %t101 %t102
+%t753 = OpCompositeExtract %f %t752 0
+%t754 = OpIAdd %u %t4 %cu212
+%t755 = OpAccessChain %pf %outb %cu0 %t754
+OpStore %t755 %t753
+%t756 = OpCompositeExtract %f %t752 1
+%t757 = OpIAdd %u %t4 %cu213
+%t758 = OpAccessChain %pf %outb %cu0 %t757
+OpStore %t758 %t756
+%t759 = OpCompositeExtract %f %t752 2
+%t760 = OpIAdd %u %t4 %cu214
+%t761 = OpAccessChain %pf %outb %cu0 %t760
+OpStore %t761 %t759
+%t762 = OpExtInst %f %glsl Length %t44
+%t763 = OpIAdd %u %t4 %cu215
+%t764 = OpAccessChain %pf %outb %cu0 %t763
+OpStore %t764 %t762
+%t765 = OpExtInst %f %glsl Distance %t44 %t45
+%t766 = OpIAdd %u %t4 %cu216
+%t767 = OpAccessChain %pf %outb %cu0 %t766
+OpStore %t767 %t765
+%t768 = OpExtInst %f %glsl Normalize %t44
+%t769 = OpIAdd %u %t4 %cu217
+%t770 = OpAccessChain %pf %outb %cu0 %t769
+OpStore %t770 %t768
+%t771 = OpExtInst %f %glsl FaceForward %t44 %t45 %t46
+%t772 = OpIAdd %u %t4 %cu218
+%t773 = OpAccessChain %pf %outb %cu0 %t772
+OpStore %t773 %t771
+%t774 = OpExtInst %f %glsl Reflect %t44 %t45
+%t775 = OpIAdd %u %t4 %cu219
+%t776 = OpAccessChain %pf %outb %cu0 %t775
+OpStore %t776 %t774
+%t777 = OpExtInst %f %glsl Refract %t44 %t45 %t46
+%t778 = OpIAdd %u %t4 %cu220
+%t779 = OpAccessChain %pf %outb %cu0 %t778
+OpStore %t779 %t777
+OpReturn
+OpFunctionEnd

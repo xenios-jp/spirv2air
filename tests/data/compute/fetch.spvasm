@@ -1,0 +1,116 @@
+; Compute test shader for tests/compute_gpu.mm: OpImageFetch on sampled 2D images (float, uint, multisampled float) and
+; a push constant. 4x4 invocations, i = gid.y * 4 + gid.x, four uvec4 written per invocation at 4 * i:
+;   +0 the float image's texel (bits) at lod 0, +1 the uint image's texel at lod 0,
+;   +2 the multisampled image's texel at sample push.sample, +3 the float image's texel at lod 1 and (gid & 1).
+               OpCapability Shader
+OpCapability ImageQuery
+               OpMemoryModel Logical GLSL450
+               OpEntryPoint GLCompute %main "main" %gid
+               OpExecutionMode %main LocalSize 4 4 1
+               OpDecorate %gid BuiltIn GlobalInvocationId
+               OpDecorate %arr ArrayStride 16
+               OpMemberDecorate %Out 0 NonReadable
+               OpMemberDecorate %Out 0 Offset 0
+               OpDecorate %Out BufferBlock
+               OpMemberDecorate %Push 0 Offset 0
+               OpDecorate %Push Block
+               OpDecorate %out DescriptorSet 0
+               OpDecorate %out Binding 0
+               OpDecorate %tex_f DescriptorSet 1
+               OpDecorate %tex_f Binding 0
+               OpDecorate %tex_u DescriptorSet 1
+               OpDecorate %tex_u Binding 1
+               OpDecorate %tex_ms DescriptorSet 1
+               OpDecorate %tex_ms Binding 2
+       %void = OpTypeVoid
+       %fnty = OpTypeFunction %void
+      %float = OpTypeFloat 32
+        %int = OpTypeInt 32 1
+       %uint = OpTypeInt 32 0
+       %int2 = OpTypeVector %int 2
+      %uint2 = OpTypeVector %uint 2
+      %uint3 = OpTypeVector %uint 3
+      %uint4 = OpTypeVector %uint 4
+     %float4 = OpTypeVector %float 4
+        %arr = OpTypeRuntimeArray %uint4
+        %Out = OpTypeStruct %arr
+       %Push = OpTypeStruct %uint
+    %img_f = OpTypeImage %float 2D 0 0 0 1 Unknown
+    %img_u = OpTypeImage %uint 2D 0 0 0 1 Unknown
+   %img_ms = OpTypeImage %float 2D 0 0 1 1 Unknown
+         %u0 = OpConstant %uint 0
+         %u1 = OpConstant %uint 1
+         %u2 = OpConstant %uint 2
+         %u3 = OpConstant %uint 3
+         %u4 = OpConstant %uint 4
+%u5 = OpConstant %uint 5
+%u6 = OpConstant %uint 6
+         %i0 = OpConstant %int 0
+         %i1 = OpConstant %int 1
+     %p_un_out = OpTypePointer Uniform %Out
+     %p_un_u4 = OpTypePointer Uniform %uint4
+  %p_pc_push = OpTypePointer PushConstant %Push
+     %p_pc_u = OpTypePointer PushConstant %uint
+    %p_uc_f = OpTypePointer UniformConstant %img_f
+    %p_uc_u = OpTypePointer UniformConstant %img_u
+   %p_uc_ms = OpTypePointer UniformConstant %img_ms
+    %p_in_u3 = OpTypePointer Input %uint3
+        %out = OpVariable %p_un_out Uniform
+       %push = OpVariable %p_pc_push PushConstant
+      %tex_f = OpVariable %p_uc_f UniformConstant
+      %tex_u = OpVariable %p_uc_u UniformConstant
+     %tex_ms = OpVariable %p_uc_ms UniformConstant
+        %gid = OpVariable %p_in_u3 Input
+       %main = OpFunction %void None %fnty
+      %entry = OpLabel
+          %g = OpLoad %uint3 %gid
+         %gx = OpCompositeExtract %uint %g 0
+         %gy = OpCompositeExtract %uint %g 1
+        %row = OpIMul %uint %gy %u4
+          %i = OpIAdd %uint %row %gx
+         %i4 = OpIMul %uint %i %u6
+         %i5 = OpIAdd %uint %i4 %u1
+         %g2 = OpVectorShuffle %uint2 %g %g 0 1
+         %c = OpBitcast %int2 %g2
+         %hx = OpBitwiseAnd %uint %gx %u1
+         %hy = OpBitwiseAnd %uint %gy %u1
+         %h2 = OpCompositeConstruct %uint2 %hx %hy
+         %hc = OpBitcast %int2 %h2
+        %imf = OpLoad %img_f %tex_f
+         %tf = OpImageFetch %float4 %imf %c Lod %i0
+         %bf = OpBitcast %uint4 %tf
+        %imu = OpLoad %img_u %tex_u
+         %tu = OpImageFetch %uint4 %imu %c Lod %i0
+         %sp = OpAccessChain %p_pc_u %push %u0
+         %sv = OpLoad %uint %sp
+         %si = OpBitcast %int %sv
+        %imm = OpLoad %img_ms %tex_ms
+         %tm = OpImageFetch %float4 %imm %c Sample %si
+         %bm = OpBitcast %uint4 %tm
+        %imf1 = OpLoad %img_f %tex_f
+         %t1 = OpImageFetch %float4 %imf1 %hc Lod %i1
+         %b1 = OpBitcast %uint4 %t1
+         %o0 = OpAccessChain %p_un_u4 %out %u0 %i4
+               OpStore %o0 %bf
+         %o1 = OpAccessChain %p_un_u4 %out %u0 %i5
+               OpStore %o1 %tu
+         %i6 = OpIAdd %uint %i4 %u2
+         %o2 = OpAccessChain %p_un_u4 %out %u0 %i6
+               OpStore %o2 %bm
+         %i7 = OpIAdd %uint %i4 %u3
+         %o3 = OpAccessChain %p_un_u4 %out %u0 %i7
+               OpStore %o3 %b1
+         %size = OpImageQuerySizeLod %uint2 %imf %i1
+         %levels = OpImageQueryLevels %uint %imf
+         %samples = OpImageQuerySamples %uint %imm
+         %msize = OpImageQuerySize %uint2 %imm
+         %q = OpCompositeConstruct %uint4 %size %levels %samples
+         %qm = OpCompositeConstruct %uint4 %msize %u0 %u0
+         %qi = OpIAdd %uint %i4 %u4
+         %qmi = OpIAdd %uint %i4 %u5
+         %qp = OpAccessChain %p_un_u4 %out %u0 %qi
+         %qmp = OpAccessChain %p_un_u4 %out %u0 %qmi
+               OpStore %qp %q
+               OpStore %qmp %qm
+               OpReturn
+               OpFunctionEnd

@@ -1,0 +1,143 @@
+; Compute test shader for tests/dispatch_gpu.mm: the shape of a switch-based control-flow dispatch loop (a pc variable, a
+; loop around a switch on it, every case ending in a jump to a constant pc through the loop's continue block) in
+; a hand-written form: forward jumps (0 -> 1, 0 -> 2, 1 -> 3), a conditional jump to constants by branches (case 0) and
+; by OpSelect (case 2), a backward jump bounded by a counter (3 -> 2, which makes the cycle 2 -> 1 -> 3 -> 2), a pc
+; that is loaded from memory on one invocation (the data-dependent jump), and the end of the program (case 4).
+; Per invocation g: acc = g ^ in[g & 63], cnt = 0, pc = 0; out[g] = acc and out[128 + g] = cnt at the end.
+; in[64] holds 4, the pc that invocation 7 loads at the end of case 3 instead of the constant.
+               OpCapability Shader
+               OpMemoryModel Logical GLSL450
+               OpEntryPoint GLCompute %main "main" %gid
+               OpExecutionMode %main LocalSize 64 1 1
+               OpDecorate %gid BuiltIn GlobalInvocationId
+               OpDecorate %arr ArrayStride 4
+               OpMemberDecorate %Buf 0 Offset 0
+               OpDecorate %Buf Block
+               OpDecorate %inb DescriptorSet 0
+               OpDecorate %inb Binding 0
+               OpDecorate %outb DescriptorSet 0
+               OpDecorate %outb Binding 1
+       %void = OpTypeVoid
+       %fnty = OpTypeFunction %void
+       %bool = OpTypeBool
+       %uint = OpTypeInt 32 0
+      %uint3 = OpTypeVector %uint 3
+        %arr = OpTypeRuntimeArray %uint
+        %Buf = OpTypeStruct %arr
+         %u0 = OpConstant %uint 0
+         %u1 = OpConstant %uint 1
+         %u2 = OpConstant %uint 2
+         %u3 = OpConstant %uint 3
+         %u4 = OpConstant %uint 4
+         %u7 = OpConstant %uint 7
+        %u10 = OpConstant %uint 10
+        %u63 = OpConstant %uint 63
+        %u64 = OpConstant %uint 64
+        %u85 = OpConstant %uint 85
+       %u128 = OpConstant %uint 128
+  %p_sb_buf = OpTypePointer StorageBuffer %Buf
+    %p_sb_u = OpTypePointer StorageBuffer %uint
+    %p_fn_u = OpTypePointer Function %uint
+   %p_in_u3 = OpTypePointer Input %uint3
+        %inb = OpVariable %p_sb_buf StorageBuffer
+       %outb = OpVariable %p_sb_buf StorageBuffer
+        %gid = OpVariable %p_in_u3 Input
+       %main = OpFunction %void None %fnty
+      %entry = OpLabel
+         %pc = OpVariable %p_fn_u Function
+        %acc = OpVariable %p_fn_u Function
+        %cnt = OpVariable %p_fn_u Function
+          %g = OpLoad %uint3 %gid
+         %gx = OpCompositeExtract %uint %g 0
+         %lo = OpBitwiseAnd %uint %gx %u63
+        %ip0 = OpAccessChain %p_sb_u %inb %u0 %lo
+        %seed = OpLoad %uint %ip0
+        %a0 = OpBitwiseXor %uint %gx %seed
+               OpStore %acc %a0
+               OpStore %cnt %u0
+               OpStore %pc %u0
+               OpBranch %hdr
+        %hdr = OpLabel
+               OpLoopMerge %exit %cont None
+               OpBranch %body
+       %body = OpLabel
+        %pcv = OpLoad %uint %pc
+               OpSelectionMerge %smerge None
+               OpSwitch %pcv %smerge 0 %c0 1 %c1 2 %c2 3 %c3 4 %c4
+; case 0: acc = acc * 3 + 1; pc = odd(g) ? 2 : 1
+         %c0 = OpLabel
+         %x0 = OpLoad %uint %acc
+         %m0 = OpIMul %uint %x0 %u3
+         %y0 = OpIAdd %uint %m0 %u1
+               OpStore %acc %y0
+         %o0 = OpBitwiseAnd %uint %gx %u1
+         %b0 = OpINotEqual %bool %o0 %u0
+               OpSelectionMerge %c0m None
+               OpBranchConditional %b0 %c0a %c0b
+        %c0a = OpLabel
+               OpStore %pc %u2
+               OpBranch %c0m
+        %c0b = OpLabel
+               OpStore %pc %u1
+               OpBranch %c0m
+        %c0m = OpLabel
+               OpBranch %cont
+; case 1: acc += 10; pc = 3
+         %c1 = OpLabel
+         %x1 = OpLoad %uint %acc
+         %y1 = OpIAdd %uint %x1 %u10
+               OpStore %acc %y1
+               OpStore %pc %u3
+               OpBranch %cont
+; case 2: acc ^= 0x55; pc = (acc & 4) ? 3 : 1
+         %c2 = OpLabel
+         %x2 = OpLoad %uint %acc
+         %y2 = OpBitwiseXor %uint %x2 %u85
+               OpStore %acc %y2
+         %o2 = OpBitwiseAnd %uint %y2 %u4
+         %b2 = OpINotEqual %bool %o2 %u0
+         %n2 = OpSelect %uint %b2 %u3 %u1
+               OpStore %pc %n2
+               OpBranch %cont
+; case 3: cnt += 1; acc += cnt; pc = cnt < (g & 3) + 2 ? 2 : (g == 7 ? in[64] : 4)
+         %c3 = OpLabel
+         %k3 = OpLoad %uint %cnt
+         %l3 = OpIAdd %uint %k3 %u1
+               OpStore %cnt %l3
+         %x3 = OpLoad %uint %acc
+         %y3 = OpIAdd %uint %x3 %l3
+               OpStore %acc %y3
+         %g3 = OpBitwiseAnd %uint %gx %u3
+         %h3 = OpIAdd %uint %g3 %u2
+         %b3 = OpULessThan %bool %l3 %h3
+               OpSelectionMerge %c3m None
+               OpBranchConditional %b3 %c3a %c3b
+        %c3a = OpLabel
+               OpStore %pc %u2
+               OpBranch %c3m
+        %c3b = OpLabel
+         %s3 = OpIEqual %bool %gx %u7
+        %dp = OpAccessChain %p_sb_u %inb %u0 %u64
+        %dv = OpLoad %uint %dp
+         %n3 = OpSelect %uint %s3 %dv %u4
+               OpStore %pc %n3
+               OpBranch %c3m
+        %c3m = OpLabel
+               OpBranch %cont
+; case 4: write the results and leave the program
+         %c4 = OpLabel
+         %x4 = OpLoad %uint %acc
+         %k4 = OpLoad %uint %cnt
+         %op = OpAccessChain %p_sb_u %outb %u0 %gx
+               OpStore %op %x4
+         %gi = OpIAdd %uint %gx %u128
+         %oq = OpAccessChain %p_sb_u %outb %u0 %gi
+               OpStore %oq %k4
+               OpBranch %smerge
+     %smerge = OpLabel
+               OpBranch %exit
+       %cont = OpLabel
+               OpBranch %hdr
+       %exit = OpLabel
+               OpReturn
+               OpFunctionEnd

@@ -1,0 +1,155 @@
+; Runtime inputs and CPU references are in tests/compute_gpu.mm.
+OpCapability Shader
+%glsl = OpExtInstImport "GLSL.std.450"
+OpMemoryModel Logical GLSL450
+OpEntryPoint GLCompute %main "main" %gid
+OpExecutionMode %main LocalSize 1 1 1
+OpDecorate %gid BuiltIn GlobalInvocationId
+OpDecorate %arr ArrayStride 4
+OpMemberDecorate %Buf 0 Offset 0
+OpDecorate %Buf Block
+OpDecorate %inb DescriptorSet 0
+OpDecorate %inb Binding 0
+OpDecorate %outb DescriptorSet 0
+OpDecorate %outb Binding 1
+%void = OpTypeVoid
+%fn = OpTypeFunction %void
+%u = OpTypeInt 32 0
+%i = OpTypeInt 32 1
+%f = OpTypeFloat 32
+%b = OpTypeBool
+%u2 = OpTypeVector %u 2
+%i2 = OpTypeVector %i 2
+%f2 = OpTypeVector %f 2
+%f4 = OpTypeVector %f 4
+%b2 = OpTypeVector %b 2
+%u3 = OpTypeVector %u 3
+%uu = OpTypeStruct %u2 %u2
+%ii = OpTypeStruct %i2 %i2
+%ff = OpTypeStruct %f2 %f2
+%fi = OpTypeStruct %f2 %i2
+%arr = OpTypeRuntimeArray %u
+%Buf = OpTypeStruct %arr
+%pb = OpTypePointer StorageBuffer %Buf
+%pu = OpTypePointer StorageBuffer %u
+%pg = OpTypePointer Input %u3
+%pf2 = OpTypePointer Function %f2
+%pi2 = OpTypePointer Function %i2
+%inb = OpVariable %pb StorageBuffer
+%outb = OpVariable %pb StorageBuffer
+%gid = OpVariable %pg Input
+%c0 = OpConstant %u 0
+%c1 = OpConstant %u 1
+%c2 = OpConstant %u 2
+%c3 = OpConstant %u 3
+%c4 = OpConstant %u 4
+%c5 = OpConstant %u 5
+%c6 = OpConstant %u 6
+%c7 = OpConstant %u 7
+%c8 = OpConstant %u 8
+%c9 = OpConstant %u 9
+%c10 = OpConstant %u 10
+%c11 = OpConstant %u 11
+%c12 = OpConstant %u 12
+%c13 = OpConstant %u 13
+%c14 = OpConstant %u 14
+%c15 = OpConstant %u 15
+%c16 = OpConstant %u 16
+%c17 = OpConstant %u 17
+%c18 = OpConstant %u 18
+%c19 = OpConstant %u 19
+%c20 = OpConstant %u 20
+%c21 = OpConstant %u 21
+%c22 = OpConstant %u 22
+%c23 = OpConstant %u 23
+%c24 = OpConstant %u 24
+%c25 = OpConstant %u 25
+%c26 = OpConstant %u 26
+%c27 = OpConstant %u 27
+%c28 = OpConstant %u 28
+%c29 = OpConstant %u 29
+%c30 = OpConstant %u 30
+%c31 = OpConstant %u 31
+%c32 = OpConstant %u 32
+%c33 = OpConstant %u 33
+%c34 = OpConstant %u 34
+%c35 = OpConstant %u 35
+%c36 = OpConstant %u 36
+%c37 = OpConstant %u 37
+%c38 = OpConstant %u 38
+%c39 = OpConstant %u 39
+%c40 = OpConstant %u 40
+%c41 = OpConstant %u 41
+%c42 = OpConstant %u 42
+%c43 = OpConstant %u 43
+%c44 = OpConstant %u 44
+%c45 = OpConstant %u 45
+%c46 = OpConstant %u 46
+%c47 = OpConstant %u 47
+%pw = OpTypePointer Workgroup %u
+%shared_atomic = OpVariable %pw Workgroup
+%barrier_sem = OpConstant %u 2376
+%max = OpConstant %u 4294967295
+%main = OpFunction %void None %fn
+%entry = OpLabel
+%device_atomic = OpAccessChain %pu %inb %c0 %c0
+OpAtomicStore %device_atomic %c1 %c0 %max
+%a0 = OpAtomicLoad %u %device_atomic %c1 %c0
+%a1 = OpAtomicIIncrement %u %device_atomic %c1 %c0
+%a2 = OpAtomicIDecrement %u %device_atomic %c1 %c0
+%a3 = OpAtomicCompareExchange %u %device_atomic %c1 %c0 %c0 %c9 %max
+%a4 = OpAtomicLoad %u %device_atomic %c1 %c0
+%a5 = OpAtomicCompareExchange %u %device_atomic %c1 %c0 %c0 %c3 %c7
+%a6 = OpAtomicLoad %u %device_atomic %c1 %c0
+%a7 = OpAtomicCompareExchange %u %device_atomic %c1 %c0 %c0 %c4 %c3
+%a8 = OpAtomicLoad %u %device_atomic %c1 %c0
+OpAtomicStore %shared_atomic %c2 %c0 %max
+%a9 = OpAtomicLoad %u %shared_atomic %c2 %c0
+%a10 = OpAtomicIIncrement %u %shared_atomic %c2 %c0
+%a11 = OpAtomicIDecrement %u %shared_atomic %c2 %c0
+%a12 = OpAtomicCompareExchange %u %shared_atomic %c2 %c0 %c0 %c9 %max
+%a13 = OpAtomicLoad %u %shared_atomic %c2 %c0
+%a14 = OpAtomicCompareExchange %u %shared_atomic %c2 %c0 %c0 %c3 %c7
+%a15 = OpAtomicLoad %u %shared_atomic %c2 %c0
+%a16 = OpAtomicCompareExchange %u %shared_atomic %c2 %c0 %c0 %c4 %c3
+%a17 = OpAtomicLoad %u %shared_atomic %c2 %c0
+OpControlBarrier %c2 %c2 %barrier_sem
+OpControlBarrier %c3 %c2 %barrier_sem
+%out0 = OpAccessChain %pu %outb %c0 %c0
+OpStore %out0 %a0
+%out1 = OpAccessChain %pu %outb %c0 %c1
+OpStore %out1 %a1
+%out2 = OpAccessChain %pu %outb %c0 %c2
+OpStore %out2 %a2
+%out3 = OpAccessChain %pu %outb %c0 %c3
+OpStore %out3 %a3
+%out4 = OpAccessChain %pu %outb %c0 %c4
+OpStore %out4 %a4
+%out5 = OpAccessChain %pu %outb %c0 %c5
+OpStore %out5 %a5
+%out6 = OpAccessChain %pu %outb %c0 %c6
+OpStore %out6 %a6
+%out7 = OpAccessChain %pu %outb %c0 %c7
+OpStore %out7 %a7
+%out8 = OpAccessChain %pu %outb %c0 %c8
+OpStore %out8 %a8
+%out9 = OpAccessChain %pu %outb %c0 %c9
+OpStore %out9 %a9
+%out10 = OpAccessChain %pu %outb %c0 %c10
+OpStore %out10 %a10
+%out11 = OpAccessChain %pu %outb %c0 %c11
+OpStore %out11 %a11
+%out12 = OpAccessChain %pu %outb %c0 %c12
+OpStore %out12 %a12
+%out13 = OpAccessChain %pu %outb %c0 %c13
+OpStore %out13 %a13
+%out14 = OpAccessChain %pu %outb %c0 %c14
+OpStore %out14 %a14
+%out15 = OpAccessChain %pu %outb %c0 %c15
+OpStore %out15 %a15
+%out16 = OpAccessChain %pu %outb %c0 %c16
+OpStore %out16 %a16
+%out17 = OpAccessChain %pu %outb %c0 %c17
+OpStore %out17 %a17
+OpReturn
+OpFunctionEnd

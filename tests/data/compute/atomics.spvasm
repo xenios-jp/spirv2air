@@ -1,0 +1,89 @@
+; Compute test shader for tests/compute_gpu.mm: atomics on a device buffer and on Workgroup memory.
+; 32 invocations per group, g = global invocation, l = local index:
+;   counters[g & 3] += 1; counters[4] = max(counters[4], l); counters[5] = min(counters[5], l);
+;   counters[6] |= 1 << l; counters[7] ^= l + 1; counters[8] -= 1
+;   shared += 1 by every invocation, then out[wg] = shared (the group size).
+               OpCapability Shader
+               OpMemoryModel Logical GLSL450
+               OpEntryPoint GLCompute %main "main" %gid %wg %lidx
+               OpExecutionMode %main LocalSize 32 1 1
+               OpDecorate %gid BuiltIn GlobalInvocationId
+               OpDecorate %wg BuiltIn WorkgroupId
+               OpDecorate %lidx BuiltIn LocalInvocationIndex
+               OpDecorate %arr ArrayStride 4
+               OpMemberDecorate %Buf 0 Offset 0
+               OpDecorate %Buf Block
+               OpDecorate %counters DescriptorSet 0
+               OpDecorate %counters Binding 0
+               OpDecorate %out DescriptorSet 0
+               OpDecorate %out Binding 1
+       %void = OpTypeVoid
+       %fnty = OpTypeFunction %void
+       %bool = OpTypeBool
+       %uint = OpTypeInt 32 0
+      %uint3 = OpTypeVector %uint 3
+        %arr = OpTypeRuntimeArray %uint
+        %Buf = OpTypeStruct %arr
+         %u0 = OpConstant %uint 0
+         %u1 = OpConstant %uint 1
+         %u2 = OpConstant %uint 2
+         %u3 = OpConstant %uint 3
+         %u4 = OpConstant %uint 4
+         %u5 = OpConstant %uint 5
+         %u6 = OpConstant %uint 6
+         %u7 = OpConstant %uint 7
+         %u8 = OpConstant %uint 8
+       %u264 = OpConstant %uint 264
+  %p_sb_buf = OpTypePointer StorageBuffer %Buf
+    %p_sb_u = OpTypePointer StorageBuffer %uint
+    %p_wg_u = OpTypePointer Workgroup %uint
+   %p_in_u3 = OpTypePointer Input %uint3
+    %p_in_u = OpTypePointer Input %uint
+   %counters = OpVariable %p_sb_buf StorageBuffer
+        %out = OpVariable %p_sb_buf StorageBuffer
+     %shared = OpVariable %p_wg_u Workgroup
+        %gid = OpVariable %p_in_u3 Input
+         %wg = OpVariable %p_in_u3 Input
+       %lidx = OpVariable %p_in_u Input
+       %main = OpFunction %void None %fnty
+      %entry = OpLabel
+          %g = OpLoad %uint3 %gid
+         %gx = OpCompositeExtract %uint %g 0
+          %w = OpLoad %uint3 %wg
+         %wx = OpCompositeExtract %uint %w 0
+         %li = OpLoad %uint %lidx
+        %is0 = OpIEqual %bool %li %u0
+               OpSelectionMerge %init_done None
+               OpBranchConditional %is0 %init %init_done
+       %init = OpLabel
+               OpStore %shared %u0
+               OpBranch %init_done
+  %init_done = OpLabel
+               OpControlBarrier %u2 %u2 %u264
+        %low = OpBitwiseAnd %uint %gx %u3
+         %c0 = OpAccessChain %p_sb_u %counters %u0 %low
+          %o = OpAtomicIAdd %uint %c0 %u1 %u0 %u1
+         %c4 = OpAccessChain %p_sb_u %counters %u0 %u4
+         %o4 = OpAtomicUMax %uint %c4 %u1 %u0 %li
+         %c5 = OpAccessChain %p_sb_u %counters %u0 %u5
+         %o5 = OpAtomicUMin %uint %c5 %u1 %u0 %li
+         %c6 = OpAccessChain %p_sb_u %counters %u0 %u6
+        %bit = OpShiftLeftLogical %uint %u1 %li
+         %o6 = OpAtomicOr %uint %c6 %u1 %u0 %bit
+         %c7 = OpAccessChain %p_sb_u %counters %u0 %u7
+        %lp1 = OpIAdd %uint %li %u1
+         %o7 = OpAtomicXor %uint %c7 %u1 %u0 %lp1
+         %c8 = OpAccessChain %p_sb_u %counters %u0 %u8
+         %o8 = OpAtomicISub %uint %c8 %u1 %u0 %u1
+         %os = OpAtomicIAdd %uint %shared %u2 %u0 %u1
+               OpControlBarrier %u2 %u2 %u264
+               OpSelectionMerge %done None
+               OpBranchConditional %is0 %store %done
+      %store = OpLabel
+         %sv = OpLoad %uint %shared
+         %op = OpAccessChain %p_sb_u %out %u0 %wx
+               OpStore %op %sv
+               OpBranch %done
+       %done = OpLabel
+               OpReturn
+               OpFunctionEnd

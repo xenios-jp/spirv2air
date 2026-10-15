@@ -1,0 +1,65 @@
+; Post-tessellation test shader for tests/tess_gpu.mm, with the interface of tessellation-evaluation shaders: a
+; per-control-point float input at Location 0, TessCoord and PrimitiveId. It places the vertex at
+; (2u - 1, 2v - 1) and passes (cp[0], cp[2], TessCoord.z, PrimitiveId) to the fragment shader.
+               OpCapability Shader
+               OpCapability Tessellation
+               OpMemoryModel Logical GLSL450
+               OpEntryPoint TessellationEvaluation %main "main" %cp %tc %pid %out0 %pv
+               OpExecutionMode %main Triangles
+               OpExecutionMode %main SpacingEqual
+               OpExecutionMode %main VertexOrderCw
+               OpDecorate %cp Location 0
+               OpDecorate %tc BuiltIn TessCoord
+               OpDecorate %pid BuiltIn PrimitiveId
+               OpDecorate %out0 Location 0
+               OpMemberDecorate %PerVertex 0 BuiltIn Position
+               OpDecorate %PerVertex Block
+       %void = OpTypeVoid
+       %fnty = OpTypeFunction %void
+      %float = OpTypeFloat 32
+        %int = OpTypeInt 32 1
+       %uint = OpTypeInt 32 0
+         %v3 = OpTypeVector %float 3
+         %v4 = OpTypeVector %float 4
+      %count = OpConstant %uint 3
+        %arr = OpTypeArray %float %count
+   %p_in_arr = OpTypePointer Input %arr
+    %p_in_v3 = OpTypePointer Input %v3
+   %p_in_int = OpTypePointer Input %int
+     %p_in_f = OpTypePointer Input %float
+   %p_out_v4 = OpTypePointer Output %v4
+  %PerVertex = OpTypeStruct %v4
+   %p_out_pv = OpTypePointer Output %PerVertex
+         %cp = OpVariable %p_in_arr Input
+         %tc = OpVariable %p_in_v3 Input
+        %pid = OpVariable %p_in_int Input
+       %out0 = OpVariable %p_out_v4 Output
+         %pv = OpVariable %p_out_pv Output
+       %int0 = OpConstant %int 0
+    %intlast = OpConstant %int 2
+         %f0 = OpConstant %float 0
+         %f1 = OpConstant %float 1
+         %f2 = OpConstant %float 2
+       %main = OpFunction %void None %fnty
+      %entry = OpLabel
+          %t = OpLoad %v3 %tc
+          %u = OpCompositeExtract %float %t 0
+          %v = OpCompositeExtract %float %t 1
+          %w = OpCompositeExtract %float %t 2
+        %c0p = OpAccessChain %p_in_f %cp %int0
+         %c0 = OpLoad %float %c0p
+        %cnp = OpAccessChain %p_in_f %cp %intlast
+         %cn = OpLoad %float %cnp
+          %p = OpLoad %int %pid
+         %pf = OpConvertSToF %float %p
+         %u2 = OpFMul %float %u %f2
+          %x = OpFSub %float %u2 %f1
+         %v2 = OpFMul %float %v %f2
+          %y = OpFSub %float %v2 %f1
+        %pos = OpCompositeConstruct %v4 %x %y %f0 %f1
+         %pp = OpAccessChain %p_out_v4 %pv %int0
+               OpStore %pp %pos
+          %o = OpCompositeConstruct %v4 %c0 %cn %w %pf
+               OpStore %out0 %o
+               OpReturn
+               OpFunctionEnd

@@ -1,0 +1,73 @@
+; Vertex test shader for tests/tilecull_gpu.mm, modelled on xenia's tile cull bounds: a StorageBuffer (set 0, binding 4) of
+; int pairs {min, max}, updated with atomics only when a plain load shows the bound would change.
+; For vertex i: v = i * 7 - 20, slot = (i & 3) * 2; bounds[slot] = min(bounds[slot], v), bounds[slot + 1] = max(.., v).
+               OpCapability Shader
+               OpMemoryModel Logical GLSL450
+               OpEntryPoint Vertex %main "main" %vi %pv
+               OpDecorate %vi BuiltIn VertexIndex
+               OpMemberDecorate %PerVertex 0 BuiltIn Position
+               OpDecorate %PerVertex Block
+               OpDecorate %rarr ArrayStride 4
+               OpMemberDecorate %Bounds 0 Restrict
+               OpMemberDecorate %Bounds 0 Offset 0
+               OpDecorate %Bounds Block
+               OpDecorate %bounds DescriptorSet 0
+               OpDecorate %bounds Binding 4
+       %void = OpTypeVoid
+       %fnty = OpTypeFunction %void
+      %float = OpTypeFloat 32
+        %int = OpTypeInt 32 1
+       %uint = OpTypeInt 32 0
+       %bool = OpTypeBool
+         %v4 = OpTypeVector %float 4
+         %u0 = OpConstant %uint 0
+         %u1 = OpConstant %uint 1
+         %u3 = OpConstant %uint 3
+       %int0 = OpConstant %int 0
+       %int7 = OpConstant %int 7
+      %int20 = OpConstant %int 20
+         %f0 = OpConstant %float 0
+         %f1 = OpConstant %float 1
+        %pos = OpConstantComposite %v4 %f0 %f0 %f0 %f1
+  %PerVertex = OpTypeStruct %v4
+   %p_out_pv = OpTypePointer Output %PerVertex
+   %p_out_v4 = OpTypePointer Output %v4
+       %rarr = OpTypeRuntimeArray %int
+     %Bounds = OpTypeStruct %rarr
+   %p_sb_blk = OpTypePointer StorageBuffer %Bounds
+   %p_sb_int = OpTypePointer StorageBuffer %int
+   %p_in_int = OpTypePointer Input %int
+         %vi = OpVariable %p_in_int Input
+         %pv = OpVariable %p_out_pv Output
+     %bounds = OpVariable %p_sb_blk StorageBuffer
+       %main = OpFunction %void None %fnty
+      %entry = OpLabel
+          %i = OpLoad %int %vi
+         %i7 = OpIMul %int %i %int7
+          %v = OpISub %int %i7 %int20
+         %iu = OpBitcast %uint %i
+         %s3 = OpBitwiseAnd %uint %iu %u3
+       %slot = OpShiftLeftLogical %uint %s3 %u1
+       %slot1 = OpIAdd %uint %slot %u1
+         %pa = OpAccessChain %p_sb_int %bounds %int0 %slot
+          %a = OpLoad %int %pa
+        %lt = OpSLessThan %bool %v %a
+               OpSelectionMerge %m1 None
+               OpBranchConditional %lt %do1 %m1
+        %do1 = OpLabel
+         %o1 = OpAtomicSMin %int %pa %u1 %u0 %v
+               OpBranch %m1
+         %m1 = OpLabel
+         %pb = OpAccessChain %p_sb_int %bounds %int0 %slot1
+          %b = OpLoad %int %pb
+        %gt = OpSGreaterThan %bool %v %b
+               OpSelectionMerge %m2 None
+               OpBranchConditional %gt %do2 %m2
+        %do2 = OpLabel
+         %o2 = OpAtomicSMax %int %pb %u1 %u0 %v
+               OpBranch %m2
+         %m2 = OpLabel
+        %op0 = OpAccessChain %p_out_v4 %pv %int0
+               OpStore %op0 %pos
+               OpReturn
+               OpFunctionEnd

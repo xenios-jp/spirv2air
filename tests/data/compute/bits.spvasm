@@ -1,0 +1,68 @@
+; Compute test shader for tests/compute_gpu.mm: GLSL.std.450 FindUMsb, FindSMsb and FindILsb (scalar and vector).
+; For x = in[g], one invocation per g, out[4g..4g+3] = FindUMsb(x), FindSMsb(int(x)), FindILsb(int(x)),
+; FindUMsb(uvec2(x, x >> 1)).y.
+               OpCapability Shader
+          %glsl = OpExtInstImport "GLSL.std.450"
+               OpMemoryModel Logical GLSL450
+               OpEntryPoint GLCompute %main "main" %gid
+               OpExecutionMode %main LocalSize 64 1 1
+               OpDecorate %gid BuiltIn GlobalInvocationId
+               OpDecorate %arr ArrayStride 4
+               OpMemberDecorate %Buf 0 Offset 0
+               OpDecorate %Buf Block
+               OpDecorate %inb DescriptorSet 0
+               OpDecorate %inb Binding 0
+               OpDecorate %outb DescriptorSet 0
+               OpDecorate %outb Binding 1
+       %void = OpTypeVoid
+       %fnty = OpTypeFunction %void
+        %int = OpTypeInt 32 1
+       %uint = OpTypeInt 32 0
+      %uint2 = OpTypeVector %uint 2
+       %int2 = OpTypeVector %int 2
+      %uint3 = OpTypeVector %uint 3
+        %arr = OpTypeRuntimeArray %uint
+        %Buf = OpTypeStruct %arr
+         %u0 = OpConstant %uint 0
+         %u1 = OpConstant %uint 1
+         %u2 = OpConstant %uint 2
+         %u3 = OpConstant %uint 3
+         %u4 = OpConstant %uint 4
+  %p_sb_buf = OpTypePointer StorageBuffer %Buf
+    %p_sb_u = OpTypePointer StorageBuffer %uint
+   %p_in_u3 = OpTypePointer Input %uint3
+        %inb = OpVariable %p_sb_buf StorageBuffer
+       %outb = OpVariable %p_sb_buf StorageBuffer
+        %gid = OpVariable %p_in_u3 Input
+       %main = OpFunction %void None %fnty
+      %entry = OpLabel
+          %g = OpLoad %uint3 %gid
+         %gx = OpCompositeExtract %uint %g 0
+         %ip = OpAccessChain %p_sb_u %inb %u0 %gx
+          %x = OpLoad %uint %ip
+         %xs = OpBitcast %int %x
+         %um = OpExtInst %int %glsl FindUMsb %x
+         %sm = OpExtInst %int %glsl FindSMsb %xs
+         %il = OpExtInst %int %glsl FindILsb %xs
+         %x2 = OpShiftRightLogical %uint %x %u1
+          %v = OpCompositeConstruct %uint2 %x %x2
+         %vm = OpExtInst %int2 %glsl FindUMsb %v
+        %vm1 = OpCompositeExtract %int %vm 1
+       %base = OpIMul %uint %gx %u4
+         %o0 = OpBitcast %uint %um
+         %o1 = OpBitcast %uint %sm
+         %o2 = OpBitcast %uint %il
+         %o3 = OpBitcast %uint %vm1
+         %p0 = OpAccessChain %p_sb_u %outb %u0 %base
+               OpStore %p0 %o0
+         %i1 = OpIAdd %uint %base %u1
+         %p1 = OpAccessChain %p_sb_u %outb %u0 %i1
+               OpStore %p1 %o1
+         %i2 = OpIAdd %uint %base %u2
+         %p2 = OpAccessChain %p_sb_u %outb %u0 %i2
+               OpStore %p2 %o2
+         %i3 = OpIAdd %uint %base %u3
+         %p3 = OpAccessChain %p_sb_u %outb %u0 %i3
+               OpStore %p3 %o3
+               OpReturn
+               OpFunctionEnd

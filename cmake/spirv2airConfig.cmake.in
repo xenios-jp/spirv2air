@@ -1,0 +1,3 @@
+@PACKAGE_INIT@
+include("${CMAKE_CURRENT_LIST_DIR}/spirv2airTargets.cmake")
+check_required_components(spirv2air)

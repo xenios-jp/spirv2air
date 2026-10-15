@@ -1,0 +1,73 @@
+; Compute test shader for tests/compute_gpu.mm: the invocation ids and a StorageBuffer block. Each invocation writes two
+; uvec4 at 2 * (gid.y * width + gid.x), width = NumWorkgroups.x * 8:
+;   (gid.x, gid.y, lid.x, lid.y) and (LocalInvocationIndex, wg.x, wg.y, 100 * nwg.x + nwg.y).
+               OpCapability Shader
+               OpMemoryModel Logical GLSL450
+               OpEntryPoint GLCompute %main "main" %gid %lid %wg %nwg %lidx
+               OpExecutionMode %main LocalSize 8 4 1
+               OpDecorate %gid BuiltIn GlobalInvocationId
+               OpDecorate %lid BuiltIn LocalInvocationId
+               OpDecorate %wg BuiltIn WorkgroupId
+               OpDecorate %nwg BuiltIn NumWorkgroups
+               OpDecorate %lidx BuiltIn LocalInvocationIndex
+               OpDecorate %arr ArrayStride 16
+               OpMemberDecorate %Out 0 Offset 0
+               OpDecorate %Out Block
+               OpDecorate %out DescriptorSet 0
+               OpDecorate %out Binding 0
+       %void = OpTypeVoid
+       %fnty = OpTypeFunction %void
+       %uint = OpTypeInt 32 0
+      %uint3 = OpTypeVector %uint 3
+      %uint4 = OpTypeVector %uint 4
+        %arr = OpTypeRuntimeArray %uint4
+        %Out = OpTypeStruct %arr
+    %p_sb_out = OpTypePointer StorageBuffer %Out
+    %p_sb_u4 = OpTypePointer StorageBuffer %uint4
+    %p_in_u3 = OpTypePointer Input %uint3
+    %p_in_u = OpTypePointer Input %uint
+        %out = OpVariable %p_sb_out StorageBuffer
+        %gid = OpVariable %p_in_u3 Input
+        %lid = OpVariable %p_in_u3 Input
+         %wg = OpVariable %p_in_u3 Input
+        %nwg = OpVariable %p_in_u3 Input
+       %lidx = OpVariable %p_in_u Input
+         %u0 = OpConstant %uint 0
+      %undef4 = OpUndef %uint4  ; module scope (spirv-opt -O hoists these); every lane is inserted below
+         %u1 = OpConstant %uint 1
+         %u2 = OpConstant %uint 2
+         %u8 = OpConstant %uint 8
+       %u100 = OpConstant %uint 100
+       %main = OpFunction %void None %fnty
+      %entry = OpLabel
+          %g = OpLoad %uint3 %gid
+          %l = OpLoad %uint3 %lid
+          %w = OpLoad %uint3 %wg
+          %n = OpLoad %uint3 %nwg
+         %li = OpLoad %uint %lidx
+         %gx = OpCompositeExtract %uint %g 0
+         %gy = OpCompositeExtract %uint %g 1
+         %lx = OpCompositeExtract %uint %l 0
+         %ly = OpCompositeExtract %uint %l 1
+         %wx = OpCompositeExtract %uint %w 0
+         %wy = OpCompositeExtract %uint %w 1
+         %nx = OpCompositeExtract %uint %n 0
+         %ny = OpCompositeExtract %uint %n 1
+      %width = OpIMul %uint %nx %u8
+        %row = OpIMul %uint %gy %width
+        %idx = OpIAdd %uint %row %gx
+         %i0 = OpIMul %uint %idx %u2
+         %i1 = OpIAdd %uint %i0 %u1
+         %nn = OpIMul %uint %nx %u100
+        %nn2 = OpIAdd %uint %nn %ny
+        %v00 = OpCompositeInsert %uint4 %gx %undef4 0
+        %v01 = OpCompositeInsert %uint4 %gy %v00 1
+        %v02 = OpCompositeInsert %uint4 %lx %v01 2
+         %v0 = OpCompositeInsert %uint4 %ly %v02 3
+         %v1 = OpCompositeConstruct %uint4 %li %wx %wy %nn2
+         %p0 = OpAccessChain %p_sb_u4 %out %u0 %i0
+               OpStore %p0 %v0
+         %p1 = OpAccessChain %p_sb_u4 %out %u0 %i1
+               OpStore %p1 %v1
+               OpReturn
+               OpFunctionEnd

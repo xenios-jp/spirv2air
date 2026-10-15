@@ -1,0 +1,51 @@
+; Pixel test shader for tests/tex_gpu.mm: sampling a 2D array texture with explicit zero gradients (the gradient forms of the sample intrinsics).
+; out = textureGrad(texture at set 3 binding 0, sampler at set 3 binding 1, first 3 components of the vec4 in the
+; uniform block at set 1 binding 0, zero gradients). The image type is 2D with Arrayed=1.
+               OpCapability Shader
+               OpMemoryModel Logical GLSL450
+               OpEntryPoint Fragment %main "main" %out
+               OpExecutionMode %main OriginUpperLeft
+               OpDecorate %out Location 0
+               OpMemberDecorate %Block 0 Offset 0
+               OpDecorate %Block Block
+               OpDecorate %ubo DescriptorSet 1
+               OpDecorate %ubo Binding 0
+               OpDecorate %tex DescriptorSet 3
+               OpDecorate %tex Binding 0
+               OpDecorate %smp DescriptorSet 3
+               OpDecorate %smp Binding 1
+       %void = OpTypeVoid
+       %fnty = OpTypeFunction %void
+      %float = OpTypeFloat 32
+        %int = OpTypeInt 32 1
+         %v2 = OpTypeVector %float 2
+         %v3 = OpTypeVector %float 3
+         %v4 = OpTypeVector %float 4
+         %f0 = OpConstant %float 0
+       %int0 = OpConstant %int 0
+         %gz = OpConstantComposite %v2 %f0 %f0
+      %Block = OpTypeStruct %v4
+    %p_un_blk = OpTypePointer Uniform %Block
+    %p_un_v4 = OpTypePointer Uniform %v4
+   %p_out_v4 = OpTypePointer Output %v4
+        %img = OpTypeImage %float 2D 0 1 0 1 Unknown
+    %p_img = OpTypePointer UniformConstant %img
+        %sam = OpTypeSampler
+    %p_sam = OpTypePointer UniformConstant %sam
+       %sampled = OpTypeSampledImage %img
+        %ubo = OpVariable %p_un_blk Uniform
+        %tex = OpVariable %p_img UniformConstant
+        %smp = OpVariable %p_sam UniformConstant
+        %out = OpVariable %p_out_v4 Output
+       %main = OpFunction %void None %fnty
+      %entry = OpLabel
+         %cp = OpAccessChain %p_un_v4 %ubo %int0
+          %c = OpLoad %v4 %cp
+        %cc = OpVectorShuffle %v3 %c %c 0 1 2
+         %im = OpLoad %img %tex
+         %sm = OpLoad %sam %smp
+         %si = OpSampledImage %sampled %im %sm
+          %r = OpImageSampleExplicitLod %v4 %si %cc Grad %gz %gz
+               OpStore %out %r
+               OpReturn
+               OpFunctionEnd

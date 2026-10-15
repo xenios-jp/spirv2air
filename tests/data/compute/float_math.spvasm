@@ -1,0 +1,310 @@
+; Runtime inputs and CPU references are in tests/compute_gpu.mm.
+OpCapability Shader
+%glsl = OpExtInstImport "GLSL.std.450"
+OpMemoryModel Logical GLSL450
+OpEntryPoint GLCompute %main "main" %gid
+OpExecutionMode %main LocalSize 64 1 1
+OpDecorate %gid BuiltIn GlobalInvocationId
+OpDecorate %arr ArrayStride 4
+OpMemberDecorate %Buf 0 Offset 0
+OpDecorate %Buf Block
+OpDecorate %inb DescriptorSet 0
+OpDecorate %inb Binding 0
+OpDecorate %outb DescriptorSet 0
+OpDecorate %outb Binding 1
+%void = OpTypeVoid
+%fn = OpTypeFunction %void
+%u = OpTypeInt 32 0
+%i = OpTypeInt 32 1
+%f = OpTypeFloat 32
+%b = OpTypeBool
+%u2 = OpTypeVector %u 2
+%i2 = OpTypeVector %i 2
+%f2 = OpTypeVector %f 2
+%f4 = OpTypeVector %f 4
+%b2 = OpTypeVector %b 2
+%u3 = OpTypeVector %u 3
+%uu = OpTypeStruct %u2 %u2
+%ii = OpTypeStruct %i2 %i2
+%ff = OpTypeStruct %f2 %f2
+%fi = OpTypeStruct %f2 %i2
+%arr = OpTypeRuntimeArray %u
+%Buf = OpTypeStruct %arr
+%pb = OpTypePointer StorageBuffer %Buf
+%pu = OpTypePointer StorageBuffer %u
+%pg = OpTypePointer Input %u3
+%pf2 = OpTypePointer Function %f2
+%pi2 = OpTypePointer Function %i2
+%inb = OpVariable %pb StorageBuffer
+%outb = OpVariable %pb StorageBuffer
+%gid = OpVariable %pg Input
+%c0 = OpConstant %u 0
+%c1 = OpConstant %u 1
+%c2 = OpConstant %u 2
+%c3 = OpConstant %u 3
+%c4 = OpConstant %u 4
+%c5 = OpConstant %u 5
+%c6 = OpConstant %u 6
+%c7 = OpConstant %u 7
+%c8 = OpConstant %u 8
+%c9 = OpConstant %u 9
+%c10 = OpConstant %u 10
+%c11 = OpConstant %u 11
+%c12 = OpConstant %u 12
+%c13 = OpConstant %u 13
+%c14 = OpConstant %u 14
+%c15 = OpConstant %u 15
+%c16 = OpConstant %u 16
+%c17 = OpConstant %u 17
+%c18 = OpConstant %u 18
+%c19 = OpConstant %u 19
+%c20 = OpConstant %u 20
+%c21 = OpConstant %u 21
+%c22 = OpConstant %u 22
+%c23 = OpConstant %u 23
+%c24 = OpConstant %u 24
+%c25 = OpConstant %u 25
+%c26 = OpConstant %u 26
+%c27 = OpConstant %u 27
+%c28 = OpConstant %u 28
+%c29 = OpConstant %u 29
+%c30 = OpConstant %u 30
+%c31 = OpConstant %u 31
+%c32 = OpConstant %u 32
+%c33 = OpConstant %u 33
+%c34 = OpConstant %u 34
+%c35 = OpConstant %u 35
+%c36 = OpConstant %u 36
+%im1 = OpConstant %i -1
+%ip2 = OpConstant %i 2
+%exps = OpConstantComposite %i2 %im1 %ip2
+%main = OpFunction %void None %fn
+%entry = OpLabel
+%whole = OpVariable %pf2 Function
+%exponent = OpVariable %pi2 Function
+%g = OpLoad %u3 %gid
+%gx = OpCompositeExtract %u %g 0
+%base = OpIMul %u %gx %c4
+%idx0 = OpIAdd %u %base %c0
+%px = OpAccessChain %pu %inb %c0 %idx0
+%x = OpLoad %u %px
+%idx1 = OpIAdd %u %base %c1
+%py = OpAccessChain %pu %inb %c0 %idx1
+%y = OpLoad %u %py
+%idx2 = OpIAdd %u %base %c2
+%pz = OpAccessChain %pu %inb %c0 %idx2
+%z = OpLoad %u %pz
+%idx3 = OpIAdd %u %base %c3
+%pw = OpAccessChain %pu %inb %c0 %idx3
+%w = OpLoad %u %pw
+%uv = OpCompositeConstruct %u2 %x %y
+%uw = OpCompositeConstruct %u2 %y %z
+%iv = OpBitcast %i2 %uv
+%iw = OpBitcast %i2 %uw
+%fv = OpBitcast %f2 %uv
+%fw = OpBitcast %f2 %uw
+%uz = OpCompositeConstruct %u2 %z %w
+%fz = OpBitcast %f2 %uz
+%fv4 = OpCompositeConstruct %f4 %fv %fz
+%r1 = OpFRem %f2 %fv %fw
+%r2 = OpCompositeExtract %f %r1 0
+%r3 = OpBitcast %u %r2
+%r4 = OpCompositeExtract %f %r1 1
+%r5 = OpBitcast %u %r4
+%r6 = OpFMod %f2 %fv %fw
+%r7 = OpCompositeExtract %f %r6 0
+%r8 = OpBitcast %u %r7
+%r9 = OpCompositeExtract %f %r6 1
+%r10 = OpBitcast %u %r9
+%r11 = OpExtInst %f2 %glsl FSign %fv
+%r12 = OpCompositeExtract %f %r11 0
+%r13 = OpBitcast %u %r12
+%r14 = OpCompositeExtract %f %r11 1
+%r15 = OpBitcast %u %r14
+%r16 = OpExtInst %f2 %glsl Exp %fv
+%r17 = OpCompositeExtract %f %r16 0
+%r18 = OpBitcast %u %r17
+%r19 = OpCompositeExtract %f %r16 1
+%r20 = OpBitcast %u %r19
+%r21 = OpExtInst %f2 %glsl Log %fv
+%r22 = OpCompositeExtract %f %r21 0
+%r23 = OpBitcast %u %r22
+%r24 = OpCompositeExtract %f %r21 1
+%r25 = OpBitcast %u %r24
+%r26 = OpExtInst %f2 %glsl Pow %fv %fw
+%r27 = OpCompositeExtract %f %r26 0
+%r28 = OpBitcast %u %r27
+%r29 = OpCompositeExtract %f %r26 1
+%r30 = OpBitcast %u %r29
+%r31 = OpExtInst %f2 %glsl Fma %fv %fw %fz
+%r32 = OpCompositeExtract %f %r31 0
+%r33 = OpBitcast %u %r32
+%r34 = OpCompositeExtract %f %r31 1
+%r35 = OpBitcast %u %r34
+%r36 = OpQuantizeToF16 %f2 %fv
+%r37 = OpCompositeExtract %f %r36 0
+%r38 = OpBitcast %u %r37
+%r39 = OpCompositeExtract %f %r36 1
+%r40 = OpBitcast %u %r39
+%r41 = OpIsInf %b2 %fv
+%r42 = OpSelect %u2 %r41 %uz %uv
+%r43 = OpCompositeExtract %u %r42 0
+%r44 = OpCompositeExtract %u %r42 1
+%r45 = OpExtInst %ff %glsl ModfStruct %fv
+%r46 = OpCompositeExtract %f2 %r45 0
+%r47 = OpCompositeExtract %f %r46 0
+%r48 = OpBitcast %u %r47
+%r49 = OpCompositeExtract %f %r46 1
+%r50 = OpBitcast %u %r49
+%r51 = OpCompositeExtract %f2 %r45 1
+%r52 = OpCompositeExtract %f %r51 0
+%r53 = OpBitcast %u %r52
+%r54 = OpCompositeExtract %f %r51 1
+%r55 = OpBitcast %u %r54
+%r56 = OpExtInst %fi %glsl FrexpStruct %fv
+%r57 = OpCompositeExtract %f2 %r56 0
+%r58 = OpCompositeExtract %f %r57 0
+%r59 = OpBitcast %u %r58
+%r60 = OpCompositeExtract %f %r57 1
+%r61 = OpBitcast %u %r60
+%r62 = OpCompositeExtract %i2 %r56 1
+%r63 = OpCompositeExtract %i %r62 0
+%r64 = OpBitcast %u %r63
+%r65 = OpCompositeExtract %i %r62 1
+%r66 = OpBitcast %u %r65
+%r67 = OpExtInst %f2 %glsl Modf %fv %whole
+%r68 = OpCompositeExtract %f %r67 0
+%r69 = OpBitcast %u %r68
+%r70 = OpCompositeExtract %f %r67 1
+%r71 = OpBitcast %u %r70
+%r72 = OpLoad %f2 %whole
+%r73 = OpCompositeExtract %f %r72 0
+%r74 = OpBitcast %u %r73
+%r75 = OpCompositeExtract %f %r72 1
+%r76 = OpBitcast %u %r75
+%r77 = OpExtInst %f2 %glsl Frexp %fv %exponent
+%r78 = OpCompositeExtract %f %r77 0
+%r79 = OpBitcast %u %r78
+%r80 = OpCompositeExtract %f %r77 1
+%r81 = OpBitcast %u %r80
+%r82 = OpLoad %i2 %exponent
+%r83 = OpCompositeExtract %i %r82 0
+%r84 = OpBitcast %u %r83
+%r85 = OpCompositeExtract %i %r82 1
+%r86 = OpBitcast %u %r85
+%r87 = OpExtInst %f2 %glsl Ldexp %fv %exps
+%r88 = OpCompositeExtract %f %r87 0
+%r89 = OpBitcast %u %r88
+%r90 = OpCompositeExtract %f %r87 1
+%r91 = OpBitcast %u %r90
+%obase = OpIMul %u %gx %c36
+%oi0 = OpIAdd %u %obase %c0
+%op0 = OpAccessChain %pu %outb %c0 %oi0
+OpStore %op0 %r3
+%oi1 = OpIAdd %u %obase %c1
+%op1 = OpAccessChain %pu %outb %c0 %oi1
+OpStore %op1 %r5
+%oi2 = OpIAdd %u %obase %c2
+%op2 = OpAccessChain %pu %outb %c0 %oi2
+OpStore %op2 %r8
+%oi3 = OpIAdd %u %obase %c3
+%op3 = OpAccessChain %pu %outb %c0 %oi3
+OpStore %op3 %r10
+%oi4 = OpIAdd %u %obase %c4
+%op4 = OpAccessChain %pu %outb %c0 %oi4
+OpStore %op4 %r13
+%oi5 = OpIAdd %u %obase %c5
+%op5 = OpAccessChain %pu %outb %c0 %oi5
+OpStore %op5 %r15
+%oi6 = OpIAdd %u %obase %c6
+%op6 = OpAccessChain %pu %outb %c0 %oi6
+OpStore %op6 %r18
+%oi7 = OpIAdd %u %obase %c7
+%op7 = OpAccessChain %pu %outb %c0 %oi7
+OpStore %op7 %r20
+%oi8 = OpIAdd %u %obase %c8
+%op8 = OpAccessChain %pu %outb %c0 %oi8
+OpStore %op8 %r23
+%oi9 = OpIAdd %u %obase %c9
+%op9 = OpAccessChain %pu %outb %c0 %oi9
+OpStore %op9 %r25
+%oi10 = OpIAdd %u %obase %c10
+%op10 = OpAccessChain %pu %outb %c0 %oi10
+OpStore %op10 %r28
+%oi11 = OpIAdd %u %obase %c11
+%op11 = OpAccessChain %pu %outb %c0 %oi11
+OpStore %op11 %r30
+%oi12 = OpIAdd %u %obase %c12
+%op12 = OpAccessChain %pu %outb %c0 %oi12
+OpStore %op12 %r33
+%oi13 = OpIAdd %u %obase %c13
+%op13 = OpAccessChain %pu %outb %c0 %oi13
+OpStore %op13 %r35
+%oi14 = OpIAdd %u %obase %c14
+%op14 = OpAccessChain %pu %outb %c0 %oi14
+OpStore %op14 %r38
+%oi15 = OpIAdd %u %obase %c15
+%op15 = OpAccessChain %pu %outb %c0 %oi15
+OpStore %op15 %r40
+%oi16 = OpIAdd %u %obase %c16
+%op16 = OpAccessChain %pu %outb %c0 %oi16
+OpStore %op16 %r43
+%oi17 = OpIAdd %u %obase %c17
+%op17 = OpAccessChain %pu %outb %c0 %oi17
+OpStore %op17 %r44
+%oi18 = OpIAdd %u %obase %c18
+%op18 = OpAccessChain %pu %outb %c0 %oi18
+OpStore %op18 %r48
+%oi19 = OpIAdd %u %obase %c19
+%op19 = OpAccessChain %pu %outb %c0 %oi19
+OpStore %op19 %r50
+%oi20 = OpIAdd %u %obase %c20
+%op20 = OpAccessChain %pu %outb %c0 %oi20
+OpStore %op20 %r53
+%oi21 = OpIAdd %u %obase %c21
+%op21 = OpAccessChain %pu %outb %c0 %oi21
+OpStore %op21 %r55
+%oi22 = OpIAdd %u %obase %c22
+%op22 = OpAccessChain %pu %outb %c0 %oi22
+OpStore %op22 %r59
+%oi23 = OpIAdd %u %obase %c23
+%op23 = OpAccessChain %pu %outb %c0 %oi23
+OpStore %op23 %r61
+%oi24 = OpIAdd %u %obase %c24
+%op24 = OpAccessChain %pu %outb %c0 %oi24
+OpStore %op24 %r64
+%oi25 = OpIAdd %u %obase %c25
+%op25 = OpAccessChain %pu %outb %c0 %oi25
+OpStore %op25 %r66
+%oi26 = OpIAdd %u %obase %c26
+%op26 = OpAccessChain %pu %outb %c0 %oi26
+OpStore %op26 %r69
+%oi27 = OpIAdd %u %obase %c27
+%op27 = OpAccessChain %pu %outb %c0 %oi27
+OpStore %op27 %r71
+%oi28 = OpIAdd %u %obase %c28
+%op28 = OpAccessChain %pu %outb %c0 %oi28
+OpStore %op28 %r74
+%oi29 = OpIAdd %u %obase %c29
+%op29 = OpAccessChain %pu %outb %c0 %oi29
+OpStore %op29 %r76
+%oi30 = OpIAdd %u %obase %c30
+%op30 = OpAccessChain %pu %outb %c0 %oi30
+OpStore %op30 %r79
+%oi31 = OpIAdd %u %obase %c31
+%op31 = OpAccessChain %pu %outb %c0 %oi31
+OpStore %op31 %r81
+%oi32 = OpIAdd %u %obase %c32
+%op32 = OpAccessChain %pu %outb %c0 %oi32
+OpStore %op32 %r84
+%oi33 = OpIAdd %u %obase %c33
+%op33 = OpAccessChain %pu %outb %c0 %oi33
+OpStore %op33 %r86
+%oi34 = OpIAdd %u %obase %c34
+%op34 = OpAccessChain %pu %outb %c0 %oi34
+OpStore %op34 %r89
+%oi35 = OpIAdd %u %obase %c35
+%op35 = OpAccessChain %pu %outb %c0 %oi35
+OpStore %op35 %r91
+OpReturn
+OpFunctionEnd

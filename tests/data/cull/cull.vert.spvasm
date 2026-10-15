@@ -1,0 +1,67 @@
+; Vertex test shader for tests/cull_gpu.mm, with the gl_PerVertex of vertices with user clip
+; planes as cull-only planes: Position, ClipDistance[1] and CullDistance[2].
+; For vertex v of the draw, from the uniform block at descriptor set 1, binding 0 (pos[v], data[v]):
+;   gl_Position = pos[v], gl_ClipDistance[0] = data[v].z, gl_CullDistance = (data[v].x, data[v].y)
+               OpCapability Shader
+               OpCapability ClipDistance
+               OpCapability CullDistance
+               OpMemoryModel Logical GLSL450
+               OpEntryPoint Vertex %main "main" %vi %pv
+               OpDecorate %vi BuiltIn VertexIndex
+               OpMemberDecorate %PerVertex 0 BuiltIn Position
+               OpMemberDecorate %PerVertex 1 BuiltIn ClipDistance
+               OpMemberDecorate %PerVertex 2 BuiltIn CullDistance
+               OpDecorate %PerVertex Block
+               OpDecorate %arr ArrayStride 16
+               OpMemberDecorate %Data 0 Offset 0
+               OpMemberDecorate %Data 1 Offset 1024
+               OpDecorate %Data Block
+               OpDecorate %data DescriptorSet 1
+               OpDecorate %data Binding 0
+       %void = OpTypeVoid
+       %fnty = OpTypeFunction %void
+      %float = OpTypeFloat 32
+        %int = OpTypeInt 32 1
+       %uint = OpTypeInt 32 0
+         %v4 = OpTypeVector %float 4
+         %u1 = OpConstant %uint 1
+         %u2 = OpConstant %uint 2
+        %u64 = OpConstant %uint 64
+       %int0 = OpConstant %int 0
+       %int1 = OpConstant %int 1
+       %int2 = OpConstant %int 2
+         %f1 = OpConstant %float 1
+        %clipArr = OpTypeArray %float %u1
+        %cullArr = OpTypeArray %float %u2
+  %PerVertex = OpTypeStruct %v4 %clipArr %cullArr
+   %p_out_pv = OpTypePointer Output %PerVertex
+   %p_out_f = OpTypePointer Output %float
+   %p_out_v4 = OpTypePointer Output %v4
+        %arr = OpTypeArray %v4 %u64
+       %Data = OpTypeStruct %arr %arr
+   %p_un_data = OpTypePointer Uniform %Data
+   %p_un_v4 = OpTypePointer Uniform %v4
+   %p_in_int = OpTypePointer Input %int
+         %vi = OpVariable %p_in_int Input
+         %pv = OpVariable %p_out_pv Output
+       %data = OpVariable %p_un_data Uniform
+       %main = OpFunction %void None %fnty
+      %entry = OpLabel
+          %v = OpLoad %int %vi
+         %pp = OpAccessChain %p_un_v4 %data %int0 %v
+        %pos = OpLoad %v4 %pp
+         %dp = OpAccessChain %p_un_v4 %data %int1 %v
+          %d = OpLoad %v4 %dp
+         %d0 = OpCompositeExtract %float %d 0
+         %d1 = OpCompositeExtract %float %d 1
+         %d2 = OpCompositeExtract %float %d 2
+        %op0 = OpAccessChain %p_out_v4 %pv %int0
+               OpStore %op0 %pos
+        %oc0 = OpAccessChain %p_out_f %pv %int1 %int0
+               OpStore %oc0 %d2
+        %ou0 = OpAccessChain %p_out_f %pv %int2 %int0
+               OpStore %ou0 %d0
+        %ou1 = OpAccessChain %p_out_f %pv %int2 %int1
+               OpStore %ou1 %d1
+               OpReturn
+               OpFunctionEnd
