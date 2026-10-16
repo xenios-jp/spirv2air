@@ -115,6 +115,7 @@ struct Decorations {
   bool invariant = false, centroid = false, flat = false, noperspective = false, sample = false;
   bool bufferBlock = false, nonWritable = false;  // BufferBlock on a struct type; NonWritable on a variable
   bool noContraction = false;
+  bool explicitMathMode = false;
 };
 struct MemberDecorations {
   std::vector<uint32_t> offset, builtin;
@@ -466,6 +467,7 @@ void Translator::decode() {
             // None forbids contracting this operation with its producers.
             // Keep these values out of the optional implicit-fusion path too.
             d.noContraction = true;
+            d.explicitMathMode = true;
             break;
           case spv::DecorationBuiltIn: d.builtin = in.operand(2); break;
           case spv::DecorationLocation: d.location = in.operand(2); break;
@@ -1822,7 +1824,9 @@ void Translator::translate(const Inst& in) {
           });
         };
         if (in.op == spv::OpFMul) {
-          if (decor_[res()].noContraction && compute()) {
+          // Explicit None grants no NSZ permission. The compatibility fma
+          // shape below normalizes exact negative-zero products to +0.
+          if (decor_[res()].noContraction && compute() && !decor_[res()].explicitMathMode) {
             // SPIRV-Cross spells a precise product fma(l, r, 0), which also turns -0 into +0; keep that. air.fma.f32 is
             // what Apple's compiler writes for an MSL fma() (it never emits llvm.fma; -fno-fast-math contracts a*b+c to
             // llvm.fmuladd instead).

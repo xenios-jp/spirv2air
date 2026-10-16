@@ -255,8 +255,8 @@ bool testPack(const Context& c, const char* path, spirv2air::HalfPackingRounding
 // fma(x, y, +0) form of a precise product), compared bit for bit with the CPU's fmaf(x, y, 0). Inputs have full-width
 // mantissas so a fused or double-rounded product would differ, and avoid subnormal results (compute modules flush
 // them).
-bool testStrictMul(const Context& c, const char* path) {
-  const char* test = "strictmul";
+bool testStrictMul(const Context& c, const char* path, bool explicitNone = false) {
+  const char* test = explicitNone ? "strictmul-none" : "strictmul";
   spirv2air::Options options;
   options.bindings = {{0, 0, 0, 0}, {0, 1, 1, 0}};
   id<MTLComputePipelineState> pso = makePipeline(c, test, path, options, 64);
@@ -290,7 +290,8 @@ bool testStrictMul(const Context& c, const char* path) {
   if (!wait(cb, test)) return false;
   const uint32_t* o = static_cast<const uint32_t*>(bout.contents);
   for (unsigned g = 0; g < n; ++g) {
-    float want = __builtin_fmaf(in[2 * g], in[2 * g + 1], 0.0f), got;
+    volatile float left = in[2 * g], right = in[2 * g + 1];
+    float want = explicitNone ? left * right : __builtin_fmaf(left, right, 0.0f), got;
     memcpy(&got, &o[g], 4);
     uint32_t wantBits;
     memcpy(&wantBits, &want, 4);
@@ -746,9 +747,9 @@ bool testAtomicExtra(const Context& c, const char* path) {
 }  // namespace
 
 int main(int argc, char** argv) {
-  if (argc != 13)
+  if (argc != 14)
     return fprintf(stderr, "usage: compute_gpu ids.spv shared.spv atomics.spv fetch.spv bits.spv ieee.spv pack.spv "
-                           "strictmul.spv integer.spv float_math.spv packing.spv atomic_extra.spv\n"),
+                           "strictmul.spv integer.spv float_math.spv packing.spv atomic_extra.spv strictmul_none.spv\n"),
            2;
   @autoreleasepool {
     id<MTLDevice> device = MTLCreateSystemDefaultDevice();
@@ -765,6 +766,7 @@ int main(int argc, char** argv) {
     ran = testStrictMul(c, argv[8]) && ran;
     for (unsigned family = 0; family < 3; ++family) ran = testCoverage(c, argv[9 + family], family) && ran;
     ran = testAtomicExtra(c, argv[12]) && ran;
+    ran = testStrictMul(c, argv[13], true) && ran;
     if (!ran || failures)
       return fprintf(stderr, "compute_gpu: %d value failures%s\n", failures, ran ? "" : ", setup failed"), 1;
     printf("compute_gpu: ids, barriers, atomics, IEEE, numeric ops, packing and image queries match\n");

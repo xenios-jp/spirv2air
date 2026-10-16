@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(spirv2air VERSION 1.0.2 LANGUAGES CXX)
+project(spirv2air VERSION 1.0.3 LANGUAGES CXX)
 if(NOT APPLE)
   message(FATAL_ERROR "This version requires the macOS SDK (CommonCrypto).")
 endif()
@@ -86,6 +86,7 @@ if(BUILD_TESTING AND SPIRV2AIR_BUILD_TESTS)
   assemble(ieee compute/ieee.spvasm vulkan1.1)
   assemble(pack compute/pack.spvasm vulkan1.1)
   assemble(strictmul compute/strictmul.spvasm vulkan1.1)
+  assemble(strictmul_none compute/strictmul_none.spvasm spv1.3)
   assemble(integer compute/integer.spvasm vulkan1.2)
   assemble(float_math compute/float_math.spvasm vulkan1.1)
   assemble(packing compute/packing.spvasm vulkan1.1)
@@ -121,7 +122,7 @@ if(BUILD_TESTING AND SPIRV2AIR_BUILD_TESTS)
                ${quad_SPV} ${triangle_SPV} ${cull_SPV} ${sample_SPV} ${demote_SPV} ${fma_SPV}
                ${layer2da_SPV} ${tex2d_SPV} ${cube_SPV} ${cubearray_SPV} ${tex3d_SPV} ${layer2dagrad_SPV} ${cubegrad_SPV} ${tex3dgrad_SPV} ${mathieee_SPV} ${lodbias_SPV}
                ${flat_vert_SPV} ${flat_frag_SPV} ${narrow_SPV} ${strict_math_SPV} ${strict_fma_SPV})
-  add_custom_target(test_data ALL DEPENDS ${TEST_SPV} ${intnoflat_SPV} ${ieee_SPV} ${pack_SPV} ${strictmul_SPV} ${integer_SPV} ${float_math_SPV} ${packing_SPV}
+  add_custom_target(test_data ALL DEPENDS ${TEST_SPV} ${intnoflat_SPV} ${ieee_SPV} ${pack_SPV} ${strictmul_SPV} ${strictmul_none_SPV} ${integer_SPV} ${float_math_SPV} ${packing_SPV}
                                    ${glslext_comp_SPV} ${glslext_frag_SPV} ${atomic_extra_SPV} ${fetchstate_SPV} ${tilecull_SPV})
   add_executable(cpu_tests tests/cpu_tests.cpp)
   target_link_libraries(cpu_tests PRIVATE spirv2air airkit)
@@ -175,6 +176,9 @@ if(BUILD_TESTING AND SPIRV2AIR_BUILD_TESTS)
         -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/apple_validate.cmake)
       set_tests_properties(apple_tools_fc PROPERTIES LABELS CPU)
     endif()
+    add_test(NAME cpu_strictmul_none COMMAND spirv2air_cli ${strictmul_none_SPV}
+      ${CMAKE_CURRENT_BINARY_DIR}/strictmul-none.metallib --buffer 0:0:0 --buffer 0:1:1)
+    set_tests_properties(cpu_strictmul_none PROPERTIES LABELS CPU)
     add_test(NAME cli_help COMMAND spirv2air_cli --help)
     file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/test-manifest.txt"
       CONTENT "fixture.vs vs default ${cull_SPV}\n")
@@ -195,7 +199,7 @@ if(BUILD_TESTING AND SPIRV2AIR_BUILD_TESTS)
     endforeach()
     add_test(NAME airkit_gpu COMMAND airkit_gpu)
     add_test(NAME compute_gpu COMMAND compute_gpu ${ids_SPV} ${shared_SPV} ${atomics_SPV} ${fetch_SPV} ${bits_SPV} ${ieee_SPV} ${pack_SPV} ${strictmul_SPV}
-             ${integer_SPV} ${float_math_SPV} ${packing_SPV} ${atomic_extra_SPV})
+             ${integer_SPV} ${float_math_SPV} ${packing_SPV} ${atomic_extra_SPV} ${strictmul_none_SPV})
     add_test(NAME tess_gpu COMMAND tess_gpu ${quad_SPV} ${triangle_SPV})
     add_test(NAME frag_gpu COMMAND frag_gpu ${sample_SPV} ${demote_SPV} ${fma_SPV})
     add_test(NAME strict_math_gpu COMMAND frag_gpu ${sample_SPV} ${demote_SPV} ${strict_math_SPV})
