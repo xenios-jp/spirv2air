@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(spirv2air VERSION 1.0.0 LANGUAGES CXX)
+project(spirv2air VERSION 1.0.1 LANGUAGES CXX)
 if(NOT APPLE)
   message(FATAL_ERROR "This version requires the macOS SDK (CommonCrypto).")
 endif()
@@ -97,6 +97,8 @@ if(BUILD_TESTING AND SPIRV2AIR_BUILD_TESTS)
   assemble(sample frag/sample.frag.spvasm vulkan1.1)
   assemble(demote frag/demote.frag.spvasm vulkan1.1)
   assemble(fma frag/fma.frag.spvasm vulkan1.1)
+  assemble(strict_math frag/strict_math.frag.spvasm spv1.3)
+  assemble(strict_fma frag/strict_fma.frag.spvasm spv1.3)
   assemble(flat_vert frag/flat.vert.spvasm vulkan1.1)
   assemble(flat_frag frag/flat.frag.spvasm vulkan1.1)
   assemble(narrow frag/narrow.frag.spvasm vulkan1.1)
@@ -118,7 +120,7 @@ if(BUILD_TESTING AND SPIRV2AIR_BUILD_TESTS)
   set(TEST_SPV ${ids_SPV} ${shared_SPV} ${atomics_SPV} ${fetch_SPV} ${bits_SPV} ${dispatch_SPV}
                ${quad_SPV} ${triangle_SPV} ${cull_SPV} ${sample_SPV} ${demote_SPV} ${fma_SPV}
                ${layer2da_SPV} ${tex2d_SPV} ${cube_SPV} ${cubearray_SPV} ${tex3d_SPV} ${layer2dagrad_SPV} ${cubegrad_SPV} ${tex3dgrad_SPV} ${mathieee_SPV} ${lodbias_SPV}
-               ${flat_vert_SPV} ${flat_frag_SPV} ${narrow_SPV})
+               ${flat_vert_SPV} ${flat_frag_SPV} ${narrow_SPV} ${strict_math_SPV} ${strict_fma_SPV})
   add_custom_target(test_data ALL DEPENDS ${TEST_SPV} ${intnoflat_SPV} ${ieee_SPV} ${pack_SPV} ${strictmul_SPV} ${integer_SPV} ${float_math_SPV} ${packing_SPV}
                                    ${glslext_comp_SPV} ${glslext_frag_SPV} ${atomic_extra_SPV} ${fetchstate_SPV} ${tilecull_SPV})
   add_executable(cpu_tests tests/cpu_tests.cpp)
@@ -185,6 +187,8 @@ if(BUILD_TESTING AND SPIRV2AIR_BUILD_TESTS)
              ${integer_SPV} ${float_math_SPV} ${packing_SPV} ${atomic_extra_SPV})
     add_test(NAME tess_gpu COMMAND tess_gpu ${quad_SPV} ${triangle_SPV})
     add_test(NAME frag_gpu COMMAND frag_gpu ${sample_SPV} ${demote_SPV} ${fma_SPV})
+    add_test(NAME strict_math_gpu COMMAND frag_gpu ${sample_SPV} ${demote_SPV} ${strict_math_SPV})
+    add_test(NAME strict_fma_gpu COMMAND frag_gpu ${sample_SPV} ${demote_SPV} ${strict_fma_SPV})
     add_test(NAME flat_gpu COMMAND flat_gpu ${flat_vert_SPV} ${flat_frag_SPV} ${narrow_SPV})
     add_test(NAME cull_gpu COMMAND cull_gpu ${cull_SPV})
     add_test(NAME dispatch_gpu COMMAND dispatch_gpu ${dispatch_SPV})
@@ -193,7 +197,7 @@ if(BUILD_TESTING AND SPIRV2AIR_BUILD_TESTS)
     add_test(NAME tilecull_gpu COMMAND tilecull_gpu ${tilecull_SPV})
     add_test(NAME tex_gpu COMMAND tex_gpu ${layer2da_SPV} ${tex2d_SPV} ${cube_SPV} ${cubearray_SPV} ${tex3d_SPV}
       ${layer2dagrad_SPV} ${cubegrad_SPV} ${tex3dgrad_SPV} ${lodbias_SPV})
-    set_tests_properties(airkit_gpu compute_gpu tess_gpu frag_gpu cull_gpu dispatch_gpu tex_gpu math_gpu fc_gpu tilecull_gpu flat_gpu
+    set_tests_properties(airkit_gpu compute_gpu tess_gpu frag_gpu strict_math_gpu strict_fma_gpu cull_gpu dispatch_gpu tex_gpu math_gpu fc_gpu tilecull_gpu flat_gpu
                          PROPERTIES LABELS GPU RUN_SERIAL TRUE)
   endif()
 endif()

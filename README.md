@@ -102,7 +102,7 @@ A module has one entry point and one function with no parameters. Supported exec
 - `TessellationEvaluation`, for triangle and quad domains, emitted as a Metal post-tessellation vertex function;
 - `GLCompute`, with a literal `LocalSize`.
 
-Supported capabilities: `Shader`, `DenormFlushToZero`, `DerivativeControl`, `DemoteToHelperInvocation`, `ImageQuery`, `Tessellation`, `SampleRateShading`, `ClipDistance` and `CullDistance`. A supported capability does not mean every operation it allows is implemented.
+Supported capabilities: `Shader`, `DenormFlushToZero`, `DerivativeControl`, `DemoteToHelperInvocation`, `ImageQuery`, `Tessellation`, `SampleRateShading`, `ClipDistance`, `CullDistance` and `FloatControls2` (strict `FPFastMathMode None` only; other masks and `FPFastMathDefault` are rejected). A supported capability does not mean every operation it allows is implemented.
 
 **Types:** booleans, 32-bit integers and floats, vectors, arrays and structs. Buffers need explicit member offsets and array strides.
 

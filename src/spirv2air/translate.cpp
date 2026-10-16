@@ -406,7 +406,7 @@ void Translator::decode() {
             c != spv::CapabilityDerivativeControl && c != spv::CapabilityDemoteToHelperInvocation &&
             c != spv::CapabilityImageQuery && c != spv::CapabilityTessellation &&
             c != spv::CapabilitySampleRateShading && c != spv::CapabilityClipDistance &&
-            c != spv::CapabilityCullDistance)
+            c != spv::CapabilityCullDistance && c != spv::CapabilityFloatControls2)
           fail("capability " + std::to_string(c));
         break;
       }
@@ -458,6 +458,12 @@ void Translator::decode() {
       case spv::OpDecorate: {
         Decorations& d = decor_[in.operand(0)];
         switch (in.operand(1)) {
+          case spv::DecorationFPFastMathMode:
+            if (in.operand(2) != 0) fail("FPFastMathMode: only None is supported");
+            // None forbids contracting this operation with its producers.
+            // Keep these values out of the optional implicit-fusion path too.
+            d.noContraction = true;
+            break;
           case spv::DecorationBuiltIn: d.builtin = in.operand(2); break;
           case spv::DecorationLocation: d.location = in.operand(2); break;
           case spv::DecorationBinding: d.binding = in.operand(2); break;

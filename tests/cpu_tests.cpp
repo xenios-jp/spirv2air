@@ -64,7 +64,7 @@ static const HeaderExpectation kHeaders[] = {
     {spirv2air::Platform::IOSSimulator, 26, 0, "01000200090000871a000000", "0200080003000100"},
 };
 int main(int argc, char** argv) {
-  if (argc != 27) return 2;  // 25 fixtures that translate, then the integer-input-without-Flat rejection fixture
+  if (argc != 29) return 2;  // 27 translating fixtures, then integer input without Flat.
   std::vector<std::vector<uint32_t>> fixtures;
   for (int i = 1; i < argc - 1; ++i) {
     auto w = read(argv[i]); check(!w.empty(), "read fixture");
@@ -79,6 +79,22 @@ int main(int argc, char** argv) {
     check(result.metallib.size() > 88 && !std::memcmp(result.metallib.data(), "MTLB", 4), "container header");
     check(result.metallib == run(w, o).metallib, "deterministic translation");
     if (i > 6) check(run(w).metallib == result.metallib, "explicit defaults equal implicit defaults");
+  }
+  check(run(fixtures[25]).metallib == run(fixtures[11]).metallib,
+        "strict None decorations preserve the NoContraction module bytes");
+  // Reject relaxed permissions that this implementation does not support.
+  for (uint32_t mask : {1u, 2u, 4u, 8u, 16u, 0x10000u, 0x20000u, 0x70000u}) {
+    auto relaxed = fixtures[25];
+    bool changed = false;
+    for (size_t p = 5; p < relaxed.size(); p += relaxed[p] >> 16) {
+      if ((relaxed[p] & 65535u) == 71 && (relaxed[p] >> 16) == 4 && relaxed[p + 2] == 40) {
+        relaxed[p + 3] = mask;
+        changed = true;
+      }
+    }
+    auto result = run(relaxed);
+    check(changed && !result.ok() && result.error.find("FPFastMathMode") != std::string::npos,
+          "reject unsupported fast math mask " + std::to_string(mask));
   }
   auto noFlat = run(read(argv[argc - 1]));
   check(!noFlat.ok() && noFlat.error.find("without Flat") != std::string::npos,

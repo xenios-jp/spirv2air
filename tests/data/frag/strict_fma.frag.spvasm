@@ -1,0 +1,49 @@
+; Same outputs as fma.frag.spvasm, with an explicit Fma(ax, ax, +0) for the rounded product p.
+; Strict FPFastMathMode None must be accepted on extended instructions and preserve fused semantics.
+               OpCapability Shader
+               OpCapability FloatControls2
+               OpExtension "SPV_KHR_float_controls2"
+       %glsl = OpExtInstImport "GLSL.std.450"
+               OpMemoryModel Logical GLSL450
+               OpEntryPoint Fragment %main "main" %a %out
+               OpExecutionMode %main OriginUpperLeft
+               OpDecorate %a Location 0
+               OpDecorate %out Location 0
+               OpDecorate %p FPFastMathMode None
+               OpDecorate %t2 NoContraction
+               OpDecorate %r2 NoContraction
+       %void = OpTypeVoid
+       %uint = OpTypeInt 32 0
+        %u2a5 = OpConstant %uint 677
+       %fnty = OpTypeFunction %void
+      %float = OpTypeFloat 32
+      %zero = OpConstant %float 0
+     %float4 = OpTypeVector %float 4
+     %float2 = OpTypeVector %float 2
+    %p_in_f4 = OpTypePointer Input %float4
+   %p_out_f4 = OpTypePointer Output %float4
+          %a = OpVariable %p_in_f4 Input
+        %out = OpVariable %p_out_f4 Output
+       %main = OpFunction %void None %fnty
+      %entry = OpLabel
+         %av = OpLoad %float4 %a
+        %ax0 = OpCompositeExtract %float %av 0
+        %axu = OpBitcast %uint %ax0
+        %axo = OpBitwiseOr %uint %axu %u2a5
+         %ax = OpBitcast %float %axo
+          %p = OpExtInst %float %glsl Fma %ax %ax %zero
+          %t = OpFMul %float %ax %ax
+          %r = OpFSub %float %t %p
+         %t2 = OpFMul %float %ax %ax
+         %r2 = OpFSub %float %t2 %p
+         %v2 = OpCompositeConstruct %float2 %ax %ax
+         %vt = OpFMul %float2 %v2 %v2
+         %pp = OpCompositeConstruct %float2 %p %p
+         %vr = OpFSub %float2 %vt %pp
+         %v0 = OpCompositeExtract %float %vr 0
+         %v1 = OpCompositeExtract %float %vr 1
+         %vs = OpFAdd %float %v0 %v1
+         %ov = OpCompositeConstruct %float4 %r %r2 %vs %p
+               OpStore %out %ov
+               OpReturn
+               OpFunctionEnd
