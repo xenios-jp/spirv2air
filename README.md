@@ -116,6 +116,7 @@ Supported capabilities: `Shader`, `DenormFlushToZero`, `DerivativeControl`, `Dem
 **Graphics:**
 - float, 32-bit int and uint scalar and vector varyings by location (integer fragment inputs must be `Flat`, as Vulkan requires), `Flat` float varyings (flat values come from the first vertex of a triangle, as in Vulkan's default);
 - depth and sample-mask outputs; sample ID and sample-mask inputs;
+- center-sampled `BaryCoordNoPerspKHR` fragment inputs (float3 linear primitive barycentrics); perspective and non-center barycentric inputs are rejected;
 - centroid, sample, perspective and no-perspective interpolation;
 - discard and demote-to-helper; derivatives;
 - bindless float texture sampling of 2D, 2D-array, 3D, cube and cube-array textures, with `Bias`, `Lod` and `Grad` operands;

@@ -410,7 +410,8 @@ void Translator::decode() {
             c != spv::CapabilityDerivativeControl && c != spv::CapabilityDemoteToHelperInvocation &&
             c != spv::CapabilityImageQuery && c != spv::CapabilityTessellation &&
             c != spv::CapabilitySampleRateShading && c != spv::CapabilityClipDistance &&
-            c != spv::CapabilityCullDistance && c != spv::CapabilityFloatControls2)
+            c != spv::CapabilityCullDistance && c != spv::CapabilityFloatControls2 &&
+            c != spv::CapabilityFragmentBarycentricKHR)
           fail("capability " + std::to_string(c));
         break;
       }
@@ -673,7 +674,8 @@ void Translator::buildSignature() {
   // Classify the module-scope variables.
   std::map<uint32_t, uint32_t> inputs, outputs;  // location -> variable
   uint32_t vertexIndex = kNone, primitiveId = kNone, fragCoord = kNone, frontFacing = kNone, perVertex = kNone,
-           fragDepth = kNone, sampleMask = kNone, sampleMaskIn = kNone, sampleId = kNone, zpdCounter = kNone;
+           fragDepth = kNone, sampleMask = kNone, sampleMaskIn = kNone, sampleId = kNone, zpdCounter = kNone,
+           linearBarycentric = kNone;
   for (uint32_t var : globals_) {
     const SType& pt = type(varType_[var]);
     const Decorations& d = decor_[var];
@@ -692,6 +694,10 @@ void Translator::buildSignature() {
         else if (!vertex && d.builtin == spv::BuiltInSampleId)
           sampleId = var;
         else if (!vertex && d.builtin == spv::BuiltInFrontFacing) frontFacing = var;
+        else if (!vertex && d.builtin == spv::BuiltInBaryCoordKHR)
+          fail("perspective barycentric input is not supported");
+        else if (!vertex && d.builtin == spv::BuiltInBaryCoordNoPerspKHR)
+          linearBarycentric = var;
         else if (!vertex && d.builtin == kNone && d.location != kNone) inputs[d.location] = var;
         else fail("input " + what);
         break;
@@ -788,6 +794,15 @@ void Translator::buildSignature() {
   if (frontFacing != kNone)
     argOfInput_[frontFacing] = int(addArg(i1_, {S("air.front_facing"), S("air.arg_type_name"), S("bool"),
                                                 S("air.arg_name"), S("front_facing")}));
+  if (linearBarycentric != kNone) {
+    const Decorations& d = decor_[linearBarycentric];
+    if (llvmType(type(varType_[linearBarycentric]).elem) != m_.vecTy(f32_, 3))
+      fail("barycentric input must be float3");
+    if (d.centroid || d.sample || d.flat) fail("barycentric input requires center sampling");
+    argOfInput_[linearBarycentric] = int(addArg(m_.vecTy(f32_, 3),
+        {S("air.barycentric_coord"), S("air.center"), S("air.no_perspective"),
+         S("air.arg_type_name"), S("float3"), S("air.arg_name"), S("linear_barycentrics")}));
+  }
   addSampleInputs(sampleId, sampleMaskIn);
   auto indirect = [&](int location, const char* typeName) -> std::vector<Metadata*> {
     return {S("air.indirect_buffer"), S("air.location_index"), I(location), I(1), S("air.read"),

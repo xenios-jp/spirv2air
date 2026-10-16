@@ -1,0 +1,27 @@
+; One center-sampled primitive barycentric input. The tests also substitute
+; BaryCoordKHR for BaryCoordNoPerspKHR to check unsupported-input rejection.
+               OpCapability Shader
+               OpCapability FragmentBarycentricKHR
+               OpExtension "SPV_KHR_fragment_shader_barycentric"
+               OpMemoryModel Logical GLSL450
+               OpEntryPoint Fragment %main "main" %barycentric %out
+               OpExecutionMode %main OriginUpperLeft
+               OpDecorate %barycentric BuiltIn BaryCoordNoPerspKHR
+               OpDecorate %out Location 0
+       %void = OpTypeVoid
+      %float = OpTypeFloat 32
+     %float3 = OpTypeVector %float 3
+     %float4 = OpTypeVector %float 4
+        %one = OpConstant %float 1
+       %func = OpTypeFunction %void
+       %pin3 = OpTypePointer Input %float3
+      %pout4 = OpTypePointer Output %float4
+%barycentric = OpVariable %pin3 Input
+        %out = OpVariable %pout4 Output
+       %main = OpFunction %void None %func
+      %entry = OpLabel
+          %v = OpLoad %float3 %barycentric
+         %ov = OpCompositeConstruct %float4 %v %one
+               OpStore %out %ov
+               OpReturn
+               OpFunctionEnd
