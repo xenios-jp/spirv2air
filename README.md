@@ -134,7 +134,7 @@ Supported capabilities: `Shader`, `DenormFlushToZero`, `DerivativeControl`, `Dem
   - packing: `PackHalf2x16`, `UnpackHalf2x16`, and Pack/Unpack `Snorm4x8`, `Unorm4x8`, `Snorm2x16`, `Unorm2x16`.
 - `Fract` is `x - floor(x)`.
 - The new trigonometric, interpolation and geometric operations follow Apple's compiler for the same MSL functions. `Step` follows the SPIR-V wording (0 if `x < edge`, otherwise 1, so a NaN operand gives 1; MSL `step` gives 0), `FMix` is MSL `mix`, and in compute `Length`/`Normalize` keep MSL's overflow and underflow rescaling.
-- `PackHalf2x16` rounds to nearest even, overflows to infinity, and keeps NaN.
+- `PackHalf2x16` defaults to nearest even, overflows to infinity, and keeps NaN. `Options::halfPackingRounding = HalfPackingRounding::TowardZero` selects explicit truncation instead: finite overflow saturates at the largest finite half, while infinities, signed zeros and half subnormals are preserved. The policy does not affect other float operations and belongs in cache keys.
 - Zero-count bitfield extract gives 0; zero-count insert keeps the base.
 - Graphics math uses Metal's fast (`air.fast_*`) intrinsics. Denormals are flushed.
 

@@ -192,27 +192,37 @@ bool testBits(const Context& c, const char* path) {
   return true;
 }
 
-// GLSL.std.450 PackHalf2x16 against the IEEE binary16 conversion (round to nearest even, overflow to infinity, NaN
-// stays NaN), computed on the CPU with _Float16, for the edge values of the half range and of the rounding steps.
-bool testPack(const Context& c, const char* path) {
-  const char* test = "pack";
+// Check both packing policies against the host IEEE conversion. The RTZ model
+// starts with the host's nearest-even half and steps down only if it overshot.
+// Exercise every finite half interval on both signs, its midpoint neighbors,
+// and independent full-width float patterns.
+bool testPack(const Context& c, const char* path, spirv2air::HalfPackingRounding rounding) {
+  bool rtz = rounding == spirv2air::HalfPackingRounding::TowardZero;
+  const char* test = rtz ? "pack-rtz" : "pack-rne";
   spirv2air::Options options;
   options.bindings = {{0, 0, 0, 0}, {0, 1, 1, 0}};
+  options.halfPackingRounding = rounding;
   id<MTLComputePipelineState> pso = makePipeline(c, test, path, options, 64);
   if (!pso) return false;
   const float inf = __builtin_inff(), nan = __builtin_nanf("");
-  const float edge[] = {
-      0.0f,           -0.0f,         1.0f,       65504.0f,      65519.996f, 65520.0f,       70000.0f,
-      131008.0f,      131009.0f,     -131008.0f, -65520.0f,     inf,        -inf,           nan,
-      5.9604645e-8f,  2.9802322e-8f, 3.0e-8f,    6.1035156e-5f, 6.0e-5f,    1.00048828125f, 1.00048840f,
-      1.00146484375f, 2049.0f,       2051.0f,    0.1f,          -0.3f,      1e-10f,         1e30f};
-  const unsigned n = 64, ne = sizeof(edge) / sizeof(edge[0]);
-  std::vector<float> in(2 * n);
-  for (unsigned g = 0; g < n; ++g) {
-    // Every edge value appears in both lanes; the remaining pairs are spread values.
-    in[2 * g] = g < ne ? edge[g] : float(int((g * 2654435761u) >> 20) - 2048) * 0.37f;
-    in[2 * g + 1] = g < ne ? edge[(g + ne / 2) % ne] : float(int((g * 40503u) >> 4) - 2048) * 1.7f;
+  std::vector<float> in = {0, -0.0f, 65504, 65519.996f, 65520, -65520, 70000, 131008, -131008,
+                          inf, -inf, nan, 3.0e-8f, -3.0e-8f, 1e-10f, -1e-10f, 1e30f, -1e30f};
+  auto fromHalf = [](uint16_t bits) { _Float16 h; memcpy(&h, &bits, 2); return float(h); };
+  for (uint32_t sign : {0u, 0x8000u}) {
+    for (uint32_t magnitude = 0; magnitude < 0x7BFFu; ++magnitude) {
+      float low = fromHalf(uint16_t(sign | magnitude));
+      float high = fromHalf(uint16_t(sign | (magnitude + 1)));
+      float midpoint = (low + high) * 0.5f;
+      in.insert(in.end(), {low, std::nextafter(midpoint, low), midpoint, std::nextafter(midpoint, high)});
+    }
   }
+  uint32_t random = 1;
+  for (unsigned i = 0; i < (1u << 18); ++i) {
+    random = random * 1664525u + 1013904223u;
+    float value; memcpy(&value, &random, 4); in.push_back(value);
+  }
+  while (in.size() % 128) in.push_back(0);
+  const unsigned n = unsigned(in.size() / 2);
   std::vector<uint32_t> outInit(n, 0xDEADBEEFu);
   id<MTLBuffer> bin = makeBuffer(c, in.data(), in.size() * 4), bout = makeBuffer(c, outInit.data(), n * 4);
   id<MTLCommandBuffer> cb = [c.queue commandBuffer];
@@ -220,25 +230,24 @@ bool testPack(const Context& c, const char* path) {
   [e setComputePipelineState:pso];
   [e setBuffer:bin offset:0 atIndex:0];
   [e setBuffer:bout offset:0 atIndex:1];
-  [e dispatchThreadgroups:MTLSizeMake(1, 1, 1) threadsPerThreadgroup:MTLSizeMake(64, 1, 1)];
+  [e dispatchThreadgroups:MTLSizeMake(n / 64, 1, 1) threadsPerThreadgroup:MTLSizeMake(64, 1, 1)];
   [e endEncoding];
   if (!wait(cb, test)) return false;
   const uint32_t* o = static_cast<const uint32_t*>(bout.contents);
-  auto half = [](float f) {
+  auto half = [&](float f) {
     _Float16 h = static_cast<_Float16>(f);
-    uint16_t pattern;
-    memcpy(&pattern, &h, 2);
+    uint16_t pattern; memcpy(&pattern, &h, 2);
+    if (rtz && std::isfinite(f) && std::fabs(float(h)) > std::fabs(f)) --pattern;
     return uint32_t(pattern);
   };
-  // A NaN is any pattern with exponent 31 and a nonzero mantissa: only that has to match, not the payload.
   auto isNan = [](uint32_t h) { return (h & 0x7C00) == 0x7C00 && (h & 0x3FF) != 0; };
   for (unsigned g = 0; g < n; ++g) {
     for (unsigned lane = 0; lane < 2; ++lane) {
       uint32_t want = half(in[2 * g + lane]), got = (o[g] >> (16 * lane)) & 0xFFFF;
-      check(got == want || (isNan(got) && isNan(want)), test, lane ? "PackHalf2x16 high half" : "PackHalf2x16 low half",
-            g, got, want);
+      check(got == want || (isNan(got) && isNan(want)), test, lane ? "high half" : "low half", g, got, want);
     }
   }
+  printf("%s: %zu conversions checked\n", test, in.size());
   return true;
 }
 
@@ -751,7 +760,8 @@ int main(int argc, char** argv) {
     ran = testFetch(c, argv[4]) && ran;
     ran = testBits(c, argv[5]) && ran;
     ran = testIeee(c, argv[6]) && ran;
-    ran = testPack(c, argv[7]) && ran;
+    ran = testPack(c, argv[7], spirv2air::HalfPackingRounding::NearestEven) && ran;
+    ran = testPack(c, argv[7], spirv2air::HalfPackingRounding::TowardZero) && ran;
     ran = testStrictMul(c, argv[8]) && ran;
     for (unsigned family = 0; family < 3; ++family) ran = testCoverage(c, argv[9 + family], family) && ran;
     ran = testAtomicExtra(c, argv[12]) && ran;

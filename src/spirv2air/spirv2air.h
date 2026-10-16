@@ -13,7 +13,7 @@ namespace spirv2air {
 
 // Identifies the output format for caches: two builds with the same kVersion must produce byte-identical output
 // for the same input. Bump it with every change that changes any output byte.
-inline constexpr char kVersion[] = "spirv2air 1.0.1";
+inline constexpr char kVersion[] = "spirv2air 1.0.2";
 
 struct Result {
   std::vector<uint8_t> metallib;  // one function, "main"
@@ -75,6 +75,10 @@ struct GraphicsBindings {
 // generated code is identical on all three; only the module triple, air.version and the container header differ.
 enum class Platform { MacOS, IOS, IOSSimulator };
 
+// Conversion policy for GLSL.std.450 PackHalf2x16. This does not affect
+// QuantizeToF16 or other floating-point operations. Include it in cache keys.
+enum class HalfPackingRounding { NearestEven, TowardZero };
+
 struct Options {
   Platform platform = Platform::MacOS;
   // Minimum OS version (macOS or iOS, per platform). 0.0 selects the default: macOS 14 or iOS 18, which is also the
@@ -94,6 +98,7 @@ struct Options {
   // Disable for callers that want the native Metal vertex_id and unmodified position respectively.
   bool vertexIndexRelativeToBase = true;
   bool positionInfToNan = true;
+  HalfPackingRounding halfPackingRounding = HalfPackingRounding::NearestEven;
 };
 
 Result translate(const uint32_t* words, size_t word_count, const Options& options = {});

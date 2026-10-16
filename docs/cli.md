@@ -18,6 +18,7 @@ The first two arguments are an input SPIR-V file and an output metallib file. Th
 | `--platform macos\|ios\|ios-simulator` | Target platform ([platforms](air.md#platforms)) |
 | `--min-os MAJOR[.MINOR]` | Minimum OS version of the target |
 | `--no-jump-thread` | Disable dispatch-loop jump threading |
+| `--half-packing-rounding rne\|rtz` | Select nearest-even (default) or toward-zero `PackHalf2x16` conversion |
 
 Graphics shaders use the default layout in the [binding contract](bindings.md); the C++ API exposes all of it.
 
@@ -29,6 +30,6 @@ Exit codes: 0 success, 1 translation rejected, 2 argument or I/O error.
 
 - Each manifest row is `<source-key> <stage> <variant> <SPIR-V path>`, with whitespace-separated fields.
 - Output files are named `<key>.<stage>.<variant>.metallib`, where `<key>` is the source key's basename up to its first dot. Output names must be unique.
-- Batch mode uses the default graphics options. Only `--function-constant-set` and `--storage-buffer` may follow `--manifest INPUT.txt OUTPUT_DIR`.
+- Batch mode uses the default graphics options. Only `--function-constant-set`, `--storage-buffer` and `--half-packing-rounding` may follow `--manifest INPUT.txt OUTPUT_DIR`.
 - It reports translation totals and diagnostics, and returns 1 if any module fails.
 - The older form `spirv2air_cli INPUT.txt OUTPUT_DIR` is still accepted for `.txt` manifests.

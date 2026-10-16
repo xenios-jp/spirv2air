@@ -371,6 +371,9 @@ bool Translator::isConstFloat(uint32_t id, float f) const {
 
 void Translator::decode() {
   if (count_ < 5 || words_[0] != spv::MagicNumber) fail("not SPIR-V");
+  if (options_.halfPackingRounding != HalfPackingRounding::NearestEven &&
+      options_.halfPackingRounding != HalfPackingRounding::TowardZero)
+    fail("unsupported half packing rounding mode");
   uint32_t bound = words_[3];
   types_.resize(bound);
   decor_.resize(bound);
@@ -2210,7 +2213,7 @@ Value* Translator::extInst(const Inst& in) {
       return r;
     }
     case GLSLstd450PackHalf2x16: {
-      // The IEEE binary16 conversion of each component (SPIR-V: "converting the components ... to the 16-bit
+      // The default IEEE binary16 conversion of each component (SPIR-V: "converting the components ... to the 16-bit
       // OpTypeFloat representation"): fptrunc rounds to nearest even, so values from 65520 up become Inf and a NaN
       // stays a NaN (Apple's compiler emits the same fptrunc for an MSL (half) cast; tests/compute_gpu.mm compares
       // every edge value with the CPU's _Float16 conversion). Callers that need a different overflow behavior, such as
@@ -2218,8 +2221,30 @@ Value* Translator::extInst(const Inst& in) {
       Value* v = a(0);
       Value* r = nullptr;
       for (unsigned c = 0; c < 2; ++c) {
-        Value* h = b_->cast(FPTrunc, b_->extractElement(v, cint(c)), f16_);
-        Value* bits = b_->cast(ZExt, b_->cast(BitCast, h, i16_), i32_);
+        Value* x = b_->extractElement(v, cint(c));
+        Value* bits;
+        if (options_.halfPackingRounding == HalfPackingRounding::TowardZero) {
+          // Integer conversion makes the rounding policy independent of AIR's
+          // fptrunc rounding, including half subnormals and finite overflow.
+          Value* u = b_->cast(BitCast, x, i32_);
+          Value* sign = b_->binop(And, b_->binop(LShr, u, cint(16)), cint(0x8000));
+          Value* exponent = b_->binop(And, b_->binop(LShr, u, cint(23)), cint(255));
+          Value* mantissa = b_->binop(And, u, cint(0x7FFFFF));
+          Value* normal = b_->binop(Or, b_->binop(Shl, b_->binop(Sub, exponent, cint(112)), cint(10)),
+                                   b_->binop(LShr, mantissa, cint(13)));
+          Value* shift = b_->binop(Sub, cint(126), exponent);
+          // Selects evaluate both inputs: never create an oversized shift.
+          shift = b_->select(b_->icmp(I_ULT, shift, cint(32)), shift, cint(31));
+          Value* subnormal = b_->binop(LShr, b_->binop(Or, mantissa, cint(0x800000)), shift);
+          Value* small = b_->select(b_->icmp(I_UGE, exponent, cint(103)), subnormal, cint(0));
+          Value* finite = b_->select(b_->icmp(I_UGE, exponent, cint(113)), normal, small);
+          finite = b_->select(b_->icmp(I_UGE, exponent, cint(143)), cint(0x7BFF), finite);
+          Value* special = b_->select(b_->icmp(I_NE, mantissa, cint(0)), cint(0x7E00), cint(0x7C00));
+          bits = b_->binop(Or, sign, b_->select(b_->icmp(I_EQ, exponent, cint(255)), special, finite));
+        } else {
+          Value* h = b_->cast(FPTrunc, x, f16_);
+          bits = b_->cast(ZExt, b_->cast(BitCast, h, i16_), i32_);
+        }
         r = c ? b_->binop(Or, r, b_->binop(Shl, bits, cint(16))) : bits;
       }
       return r;

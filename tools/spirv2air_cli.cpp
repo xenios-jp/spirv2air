@@ -37,6 +37,12 @@ static spirv2air::StorageBufferSlot storageSlot(const std::string& text) {
   if (a == text.npos || b == text.npos) throw std::runtime_error("storage buffer must be SET:BINDING:OFFSET");
   return {number(text.substr(0, a)), number(text.substr(a + 1, b - a - 1)), number(text.substr(b + 1))};
 }
+static spirv2air::HalfPackingRounding halfRounding(const std::string& value) {
+  if (value == "rne") return spirv2air::HalfPackingRounding::NearestEven;
+  if (value == "rtz") return spirv2air::HalfPackingRounding::TowardZero;
+  throw std::runtime_error("unknown half packing rounding: " + value);
+}
+
 // Batch rows: <source-key> <stage> <variant> <SPIR-V path>.
 // The source-key basename (without its suffix), stage and variant determine the output name.
 static int manifest(const char* input, const char* output, const spirv2air::Options& opts = {}) {
@@ -84,8 +90,8 @@ int main(int argc, char** argv) {
   if (argc == 2 && std::string(argv[1]) == "--help") {
     std::puts(
         "usage: spirv2air_cli INPUT.spv OUTPUT.metallib [--buffer SET:BINDING:INDEX] [--texture SET:BINDING:INDEX] "
-        "[--push-constant INDEX] [--no-jump-thread] [--function-constant-set SET] [--storage-buffer SET:BINDING:OFFSET] [--platform macos|ios|ios-simulator] [--min-os MAJOR[.MINOR]]");
-    std::puts("       spirv2air_cli --manifest INPUT.txt OUTPUT_DIR [--function-constant-set SET] [--storage-buffer SET:BINDING:OFFSET]\n       spirv2air_cli INPUT.txt OUTPUT_DIR (legacy batch form)");
+        "[--push-constant INDEX] [--no-jump-thread] [--function-constant-set SET] [--storage-buffer SET:BINDING:OFFSET] [--platform macos|ios|ios-simulator] [--min-os MAJOR[.MINOR]] [--half-packing-rounding rne|rtz]");
+    std::puts("       spirv2air_cli --manifest INPUT.txt OUTPUT_DIR [--function-constant-set SET] [--storage-buffer SET:BINDING:OFFSET] [--half-packing-rounding rne|rtz]\n       spirv2air_cli INPUT.txt OUTPUT_DIR (legacy batch form)");
     return 0;
   }
   if (argc < 3) { std::fprintf(stderr, "usage: spirv2air_cli INPUT.spv OUTPUT.metallib [options]; see --help\n"); return 2; }
@@ -95,9 +101,10 @@ int main(int argc, char** argv) {
       for (int i = 4; i < argc; i += 2) {
         std::string flag = argv[i];
         if (i + 1 >= argc) throw std::runtime_error("missing argument: " + flag);
-        if (flag == "--function-constant-set") opts.graphics.functionConstantSet = int32_t(number(argv[i + 1]));
+        if (flag == "--half-packing-rounding") opts.halfPackingRounding = halfRounding(argv[i + 1]);
+        else if (flag == "--function-constant-set") opts.graphics.functionConstantSet = int32_t(number(argv[i + 1]));
         else if (flag == "--storage-buffer") opts.graphics.storageBuffers.push_back(storageSlot(argv[i + 1]));
-        else throw std::runtime_error("--manifest accepts [--function-constant-set N] [--storage-buffer SET:BINDING:OFFSET]");
+        else throw std::runtime_error("--manifest accepts [--function-constant-set N] [--storage-buffer SET:BINDING:OFFSET] [--half-packing-rounding rne|rtz]");
       }
       return manifest(argv[2], argv[3], opts);
     }
@@ -107,6 +114,7 @@ int main(int argc, char** argv) {
     for (int i = 3; i < argc; ++i) {
       std::string flag = argv[i];
       if (flag == "--no-jump-thread") opts.jumpThread = false;
+      else if (flag == "--half-packing-rounding" && i + 1 < argc) opts.halfPackingRounding = halfRounding(argv[++i]);
  else if (flag == "--storage-buffer" && i + 1 < argc) opts.graphics.storageBuffers.push_back(storageSlot(argv[++i]));
       else if (flag == "--function-constant-set" && i + 1 < argc) opts.graphics.functionConstantSet = int32_t(number(argv[++i]));
       else if (flag == "--platform" && i + 1 < argc) {
