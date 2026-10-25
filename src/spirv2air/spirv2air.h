@@ -13,7 +13,7 @@ namespace spirv2air {
 
 // Identifies the output format for caches: two builds with the same kVersion must produce byte-identical output
 // for the same input. Bump it with every change that changes any output byte.
-inline constexpr char kVersion[] = "spirv2air 1.0.3";
+inline constexpr char kVersion[] = "spirv2air 1.0.4";
 
 struct Result {
   std::vector<uint8_t> metallib;  // one function, "main"

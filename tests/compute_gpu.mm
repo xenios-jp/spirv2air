@@ -95,6 +95,31 @@ bool testIds(const Context& c, const char* path) {
   return true;
 }
 
+bool testTables(const Context& c, const char* path) {
+  const char* test = "tables";
+  spirv2air::Options options;
+  options.bindings = {{0, 0, 0, 0}};
+  id<MTLComputePipelineState> pso = makePipeline(c, test, path, options, 64);
+  if (!pso) return false;
+  const unsigned n = 4 * 64;
+  std::vector<uint32_t> init(n, 0xFFFFFFFFu);
+  id<MTLBuffer> out = makeBuffer(c, init.data(), n * 4);
+  id<MTLCommandBuffer> cb = [c.queue commandBuffer];
+  id<MTLComputeCommandEncoder> e = [cb computeCommandEncoder];
+  [e setComputePipelineState:pso];
+  [e setBuffer:out offset:0 atIndex:0];
+  [e dispatchThreadgroups:MTLSizeMake(4, 1, 1) threadsPerThreadgroup:MTLSizeMake(64, 1, 1)];
+  [e endEncoding];
+  if (!wait(cb, test)) return false;
+  const uint32_t table[8] = {11, 13, 17, 19, 23, 29, 31, 37}, prv[4] = {1, 3, 5, 7}, scratch[4] = {5, 6, 7, 8};
+  const uint32_t* v = static_cast<const uint32_t*>(out.contents);
+  for (unsigned g = 0; g < n; ++g) {
+    uint32_t want = table[g % 8] + 100 * prv[(g / 8) % 4] + 10000 * scratch[(g + 1) % 4];
+    check(v[g] == want, test, "lookup", g, v[g], want);
+  }
+  return true;
+}
+
 bool testShared(const Context& c, const char* path) {
   const char* test = "shared";
   spirv2air::Options options;
@@ -747,9 +772,10 @@ bool testAtomicExtra(const Context& c, const char* path) {
 }  // namespace
 
 int main(int argc, char** argv) {
-  if (argc != 14)
+  if (argc != 15)
     return fprintf(stderr, "usage: compute_gpu ids.spv shared.spv atomics.spv fetch.spv bits.spv ieee.spv pack.spv "
-                           "strictmul.spv integer.spv float_math.spv packing.spv atomic_extra.spv strictmul_none.spv\n"),
+                           "strictmul.spv integer.spv float_math.spv packing.spv atomic_extra.spv strictmul_none.spv "
+                           "tables.spv\n"),
            2;
   @autoreleasepool {
     id<MTLDevice> device = MTLCreateSystemDefaultDevice();
@@ -767,9 +793,10 @@ int main(int argc, char** argv) {
     for (unsigned family = 0; family < 3; ++family) ran = testCoverage(c, argv[9 + family], family) && ran;
     ran = testAtomicExtra(c, argv[12]) && ran;
     ran = testStrictMul(c, argv[13], true) && ran;
+    ran = testTables(c, argv[14]) && ran;
     if (!ran || failures)
       return fprintf(stderr, "compute_gpu: %d value failures%s\n", failures, ran ? "" : ", setup failed"), 1;
-    printf("compute_gpu: ids, barriers, atomics, IEEE, numeric ops, packing and image queries match\n");
+    printf("compute_gpu: ids, barriers, atomics, IEEE, numeric ops, packing, image queries and tables match\n");
   }
   return 0;
 }

@@ -308,6 +308,7 @@ class Translator {
   std::vector<std::string> fcNames_;  // storage for mtlb::FunctionConstant::name
   std::vector<mtlb::FunctionConstant> fcEntries_;
   bool isFunctionConstant(uint32_t var) const;
+  bool readOnlyTable(uint32_t var, Value* init, Pointer& p);
   int storageSlot(const Decorations& d) const {
     for (size_t k = 0; k < options_.graphics.storageBuffers.size(); ++k)
       if (options_.graphics.storageBuffers[k].set == d.set && options_.graphics.storageBuffers[k].binding == d.binding)
@@ -553,6 +554,12 @@ void Translator::decode() {
         stored_[root[p] != kNone ? root[p] : p] = true;
         break;
       }
+      case spv::OpExtInst:  // modf and frexp with a pointer write the whole part through it
+        if (in.wc > 6 && (in.w[4] == GLSLstd450Modf || in.w[4] == GLSLstd450Frexp)) {
+          uint32_t p = in.w[6];
+          stored_[root[p] != kNone ? root[p] : p] = true;
+        }
+        break;
       default: break;
     }
   }
@@ -1050,6 +1057,9 @@ void Translator::buildComputeEntry() {
       case spv::StorageClassInput: {
         Type* t = llvmType(pt.elem);
         p.kind = Pointer::Private;
+        if (pt.storage == spv::StorageClassPrivate && varInit_.count(var) &&
+            readOnlyTable(var, val(varInit_.at(var)), p))
+          break;
         p.ptr = entryB_->allocaInst(t, 16);
         Value* init = pt.storage == spv::StorageClassInput ? inputValue(var, t)
                       : varInit_.count(var)                ? val(varInit_.at(var))
@@ -1324,6 +1334,7 @@ void Translator::translateFunction() {
         p.kind = Pointer::Private;
         p.type = pt.elem;
         p.variable = in.operand(1);
+        if (in.wc > 4 && readOnlyTable(in.operand(1), val(in.operand(3)), p)) break;
         p.ptr = entryB_->allocaInst(llvmType(pt.elem), 16);
         if (in.wc > 4) entryB_->store(val(in.operand(3)), p.ptr, 4);
         break;
@@ -1387,6 +1398,16 @@ Value* Translator::loadBuffer(uint32_t typeId, Value* base, unsigned addrSpace, 
     }
     default: fail("buffer load of type op " + std::to_string(t.op));
   }
+}
+
+// A variable that is only ever read keeps its initializer in a constant address space global: a private copy would
+// be stored to every invocation's stack before a dynamically indexed read (a lookup table) could load from it.
+bool Translator::readOnlyTable(uint32_t var, Value* init, Pointer& p) {
+  if (stored_[var] || init->vk != Value::Const) return false;
+  p.addrSpace = 2;
+  p.ptr = m_.addGlobal("table" + std::to_string(var), llvmType(p.type), 2, static_cast<Constant*>(init), 16,
+                       airbc::Link_Internal, 1, true);
+  return true;
 }
 
 bool Translator::isFunctionConstant(uint32_t var) const {

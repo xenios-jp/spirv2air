@@ -1,0 +1,84 @@
+; Compute test shader for tests/compute_gpu.mm: initialized variables read at dynamic indices. The function and
+; private tables are only ever read, so they live in constant memory; the scratch one is written first.
+; With g = global invocation:
+;   out[g] = table[g % 8] + 100 * prv[(g / 8) % 4] + 10000 * scratch[(g + 1) % 4], where scratch = {5, 6, 7, 8}
+;   with scratch[g % 4] set to 9 first
+               OpCapability Shader
+               OpMemoryModel Logical GLSL450
+               OpEntryPoint GLCompute %main "main" %gid
+               OpExecutionMode %main LocalSize 64 1 1
+               OpDecorate %gid BuiltIn GlobalInvocationId
+               OpDecorate %arr ArrayStride 4
+               OpMemberDecorate %Out 0 Offset 0
+               OpDecorate %Out Block
+               OpDecorate %out DescriptorSet 0
+               OpDecorate %out Binding 0
+       %void = OpTypeVoid
+       %fnty = OpTypeFunction %void
+       %uint = OpTypeInt 32 0
+      %uint3 = OpTypeVector %uint 3
+        %arr = OpTypeRuntimeArray %uint
+        %Out = OpTypeStruct %arr
+         %u0 = OpConstant %uint 0
+         %u1 = OpConstant %uint 1
+         %u3 = OpConstant %uint 3
+         %u4 = OpConstant %uint 4
+         %u5 = OpConstant %uint 5
+         %u6 = OpConstant %uint 6
+         %u7 = OpConstant %uint 7
+         %u8 = OpConstant %uint 8
+         %u9 = OpConstant %uint 9
+       %u100 = OpConstant %uint 100
+     %u10000 = OpConstant %uint 10000
+        %u11 = OpConstant %uint 11
+        %u13 = OpConstant %uint 13
+        %u17 = OpConstant %uint 17
+        %u19 = OpConstant %uint 19
+        %u23 = OpConstant %uint 23
+        %u29 = OpConstant %uint 29
+        %u31 = OpConstant %uint 31
+        %u37 = OpConstant %uint 37
+       %arr8 = OpTypeArray %uint %u8
+       %arr4 = OpTypeArray %uint %u4
+      %table = OpConstantComposite %arr8 %u11 %u13 %u17 %u19 %u23 %u29 %u31 %u37
+     %prvval = OpConstantComposite %arr4 %u1 %u3 %u5 %u7
+    %scratch = OpConstantComposite %arr4 %u5 %u6 %u7 %u8
+    %p_sb_out = OpTypePointer StorageBuffer %Out
+     %p_sb_u = OpTypePointer StorageBuffer %uint
+    %p_in_u3 = OpTypePointer Input %uint3
+   %p_fn_arr8 = OpTypePointer Function %arr8
+   %p_fn_arr4 = OpTypePointer Function %arr4
+   %p_pv_arr4 = OpTypePointer Private %arr4
+     %p_fn_u = OpTypePointer Function %uint
+     %p_pv_u = OpTypePointer Private %uint
+        %out = OpVariable %p_sb_out StorageBuffer
+        %gid = OpVariable %p_in_u3 Input
+        %prv = OpVariable %p_pv_arr4 Private %prvval
+       %main = OpFunction %void None %fnty
+      %entry = OpLabel
+         %tv = OpVariable %p_fn_arr8 Function %table
+         %sv = OpVariable %p_fn_arr4 Function %scratch
+          %g = OpLoad %uint3 %gid
+         %gx = OpCompositeExtract %uint %g 0
+         %i8 = OpBitwiseAnd %uint %gx %u7
+         %tp = OpAccessChain %p_fn_u %tv %i8
+          %t = OpLoad %uint %tp
+         %gd = OpShiftRightLogical %uint %gx %u3
+         %i4 = OpBitwiseAnd %uint %gd %u3
+         %pp = OpAccessChain %p_pv_u %prv %i4
+          %p = OpLoad %uint %pp
+         %ws = OpBitwiseAnd %uint %gx %u3
+         %wp = OpAccessChain %p_fn_u %sv %ws
+               OpStore %wp %u9
+         %g1 = OpIAdd %uint %gx %u1
+         %rs = OpBitwiseAnd %uint %g1 %u3
+         %rp = OpAccessChain %p_fn_u %sv %rs
+          %s = OpLoad %uint %rp
+         %p1 = OpIMul %uint %p %u100
+         %s1 = OpIMul %uint %s %u10000
+         %r0 = OpIAdd %uint %t %p1
+          %r = OpIAdd %uint %r0 %s1
+       %outp = OpAccessChain %p_sb_u %out %u0 %gx
+               OpStore %outp %r
+               OpReturn
+               OpFunctionEnd
