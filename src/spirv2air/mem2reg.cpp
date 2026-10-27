@@ -26,6 +26,21 @@ bool constantIndex(const Value* v, uint64_t& out) {
   return true;
 }
 
+// A null, undef or poison constant: the same constant of each element type.
+bool uniformConstant(const Value* v) {
+  if (v->vk != Value::Const) return false;
+  auto ck = static_cast<const Constant*>(v)->ck;
+  return ck == Constant::Null || ck == Constant::Undef || ck == Constant::Poison;
+}
+
+Value* uniformElement(Module& m, const Value* v, Type* t) {
+  switch (static_cast<const Constant*>(v)->ck) {
+    case Constant::Undef: return m.constUndef(t);
+    case Constant::Poison: return m.constPoison(t);
+    default: return m.constNull(t);
+  }
+}
+
 // The last round's rewrite of splitAggregates, left to promoteAllocas' first walk over every operand: instructions
 // with an id (tag - base < n) are the split GEPs; dead ones are removed, and an operand with a replacement takes it.
 struct SplitRewrite {
@@ -36,10 +51,11 @@ struct SplitRewrite {
   unsigned idOf(const Value* v) const { return v->tag - base < n && v->vk == Value::Inst ? v->tag - base : ~0u; }
 };
 
-// Splits each entry-block array or struct alloca whose only uses are GEPs `0, c, ...` with constant indices into one
-// alloca per element; a GEP `0, c` becomes element c's alloca and a longer one a GEP into it. Repeats until nothing
-// splits, so nested aggregates split level by level. The split aggregates leave the entry block here; the rest of
-// the last round's rewrite is left in `rewrite`.
+// Splits each entry-block array or struct alloca whose only uses are GEPs `0, c, ...` with constant indices, and whole
+// stores of a null, undef or poison constant, into one alloca per element; a GEP `0, c` becomes element c's alloca and a
+// longer one a GEP into it, and a whole store a store to each element. Repeats until nothing splits, so nested
+// aggregates split level by level. The split aggregates leave the entry block here; the rest of the last round's
+// rewrite is left in `rewrite`, unless that round split a whole store (its element stores are inserted here).
 void splitAggregates(Module& m, Function* f, SplitRewrite& rewrite) {
   BasicBlock* entry = f->blocks[0];
   for (bool changed = true; changed;) {
@@ -60,7 +76,7 @@ void splitAggregates(Module& m, Function* f, SplitRewrite& rewrite) {
       unsigned k = v->tag - base;
       return k < A && v->vk == Value::Inst && aggregates[k] == v ? int(k) : -1;
     };
-    std::vector<std::vector<Instruction*>> geps(A);
+    std::vector<std::vector<Instruction*>> geps(A), stores(A);
     std::vector<char> unsplittable(A, 0);
     for (BasicBlock* b : f->blocks)
       for (Instruction* i : b->insts)
@@ -73,18 +89,22 @@ void splitAggregates(Module& m, Function* f, SplitRewrite& rewrite) {
                     constantIndex(i->ops[2], c) && c < (t->kind == Type::Array ? t->n : t->elems.size());
           if (ok)
             geps[a].push_back(i), i->tag = base + next++;
+          else if (i->op == Op::Store && k == 1 && !i->isVolatile && uniformConstant(i->ops[0]))
+            stores[a].push_back(i), i->tag = base + next++;
           else
             unsplittable[a] = 1;
         }
     std::vector<Value*> repl(next, nullptr);
     std::vector<char> dead(next, 0);
+    std::vector<std::vector<Instruction*>> split(next);  // what replaces each split whole store
+    bool storesSplit = false;
     std::vector<Instruction*> insts;
     bool nested = false;  // an element is itself an aggregate, which the next round may split
     for (Instruction* i : entry->insts) {
       int a = aggregateOf(i);
-      bool split = a >= 0 && !geps[a].empty() && !unsplittable[a];
-      if (!split) insts.push_back(i);
-      if (!split) continue;
+      bool splits = a >= 0 && !geps[a].empty() && !unsplittable[a];
+      if (!splits) insts.push_back(i);
+      if (!splits) continue;
       std::unordered_map<uint64_t, Instruction*> elements;
       for (Instruction* g : geps[a]) {
         uint64_t c = 0;
@@ -109,28 +129,47 @@ void splitAggregates(Module& m, Function* f, SplitRewrite& rewrite) {
           g->ops[1] = m.constNull(g->ops[1]->type);
         }
       }
+      // A whole store of a uniform constant becomes a store of the element's constant to each element.
+      for (Instruction* st : stores[a]) {
+        std::vector<Instruction*>& into = split[st->tag - base];
+        std::vector<std::pair<uint64_t, Instruction*>> ordered(elements.begin(), elements.end());
+        std::sort(ordered.begin(), ordered.end());
+        for (auto& [c, e] : ordered) {
+          Instruction* es = m.newInst(Op::Store, st->type);
+          es->ops = {uniformElement(m, st->ops[0], e->srcElemTy), e};
+          es->align = st->align;
+          into.push_back(es);
+        }
+        dead[st->tag - base] = 1;
+        storesSplit = true;
+      }
       dead[i->tag - base] = 1;
       changed = true;
     }
     entry->insts = std::move(insts);
     if (!changed) break;
-    // Instructions created above (the element allocas) have tag 0, which is outside [base, base + next).
+    // Instructions created above (the element allocas and stores) have tag 0, which is outside [base, base + next).
     rewrite = {base, next, std::move(repl), std::move(dead)};
-    if (!nested) break;
+    if (!nested && !storesSplit) break;
     auto idOf = [&](const Value* v) { return rewrite.idOf(v); };
     for (BasicBlock* b : f->blocks) {
-      std::vector<Instruction*>& list = b->insts;
-      list.erase(std::remove_if(list.begin(), list.end(),
-                                [&](Instruction* i) {
-                                  unsigned k = idOf(i);
-                                  return k != ~0u && rewrite.dead[k];
-                                }),
-                 list.end());
-      for (Instruction* i : list)
+      std::vector<Instruction*> list;
+      list.reserve(b->insts.size());
+      for (Instruction* i : b->insts) {
+        unsigned k = idOf(i);
+        if (k == ~0u || !rewrite.dead[k]) {
+          list.push_back(i);
+          continue;
+        }
+        list.insert(list.end(), split[k].begin(), split[k].end());
+      }
+      b->insts = std::move(list);
+      for (Instruction* i : b->insts)
         for (Value*& v : i->ops)
           if (unsigned k = idOf(v); k != ~0u && rewrite.repl[k]) v = rewrite.repl[k];
     }
     rewrite = {};
+    if (!nested) break;
   }
 }
 
@@ -142,12 +181,95 @@ struct Row {
   size_t size() const { return size_t(last - first); }
 };
 
+// Rewrites element loads and stores through a GEP `0, c` (constant c) on an entry-block vector alloca into whole-vector
+// ones, an extractelement after a load and an insertelement into the loaded vector before a store, when the alloca is
+// otherwise only loaded and stored whole. That leaves it promotable, and the lanes then go their own way in
+// scalarize.cpp, so a lane stored once and never read again no longer keeps its computation alive.
+void wholeVectorAccesses(Module& m, Function* f) {
+  std::unordered_map<const Value*, char> vectors;  // alloca -> still rewritable
+  for (Instruction* i : f->blocks[0]->insts)
+    if (i->op == Op::Alloca && i->srcElemTy->kind == Type::Vector) vectors[i] = 1;
+  if (vectors.empty()) return;
+  std::unordered_map<const Value*, Instruction*> elementOf;  // GEP -> its alloca
+  for (BasicBlock* b : f->blocks)
+    for (Instruction* i : b->insts)
+      for (size_t k = 0; k < i->ops.size(); ++k) {
+        auto it = vectors.find(i->ops[k]);
+        if (it == vectors.end()) continue;
+        const Type* t = static_cast<const Instruction*>(i->ops[k])->srcElemTy;
+        uint64_t first = 1, c = 0;
+        bool whole = !i->isVolatile && ((i->op == Op::Load && k == 0 && i->type == t) ||
+                                        (i->op == Op::Store && k == 1 && i->ops[0]->type == t));
+        bool element = i->op == Op::GEP && k == 0 && i->ops.size() == 3 && constantIndex(i->ops[1], first) &&
+                       first == 0 && constantIndex(i->ops[2], c) && c < t->n;
+        if (element)
+          elementOf[i] = static_cast<Instruction*>(i->ops[k]);
+        else if (!whole)
+          it->second = 0;
+      }
+  // Every use of an element GEP has to be a non-volatile load or store of the element through it.
+  for (BasicBlock* b : f->blocks)
+    for (Instruction* i : b->insts)
+      for (size_t k = 0; k < i->ops.size(); ++k) {
+        auto it = elementOf.find(i->ops[k]);
+        if (it == elementOf.end()) continue;
+        const Type* e = it->second->srcElemTy->elem;
+        bool ok = !i->isVolatile && ((i->op == Op::Load && k == 0 && i->type == e) ||
+                                     (i->op == Op::Store && k == 1 && i->ops[0]->type == e));
+        if (!ok) vectors[it->second] = 0;
+      }
+  bool any = false;
+  for (auto& [g, a] : elementOf) any |= vectors[a] != 0;
+  if (!any) return;
+  for (BasicBlock* b : f->blocks) {
+    std::vector<Instruction*> list;
+    list.reserve(b->insts.size());
+    for (Instruction* i : b->insts) {
+      Instruction* a = nullptr;
+      if (i->op == Op::GEP) {
+        auto it = elementOf.find(i);
+        if (it != elementOf.end() && vectors[it->second]) continue;  // its loads and stores no longer use it
+      }
+      size_t k = i->op == Op::Load ? 0 : i->op == Op::Store ? 1 : 2;
+      if (k < i->ops.size()) {
+        auto it = elementOf.find(i->ops[k]);
+        if (it != elementOf.end() && vectors[it->second]) a = it->second;
+      }
+      if (!a) {
+        list.push_back(i);
+        continue;
+      }
+      Value* index = static_cast<Instruction*>(i->ops[k])->ops[2];
+      Instruction* whole = m.newInst(Op::Load, a->srcElemTy);
+      whole->ops = {a};
+      whole->align = a->align;
+      list.push_back(whole);
+      if (i->op == Op::Load) {
+        // The load becomes the extract, keeping its identity for its users.
+        i->op = Op::ExtractElement;
+        i->ops = {whole, index};
+        i->align = 0;
+        list.push_back(i);
+      } else {
+        Instruction* insert = m.newInst(Op::InsertElement, a->srcElemTy);
+        insert->ops = {whole, i->ops[0], index};
+        list.push_back(insert);
+        i->ops = {insert, a};
+        i->align = a->align;
+        list.push_back(i);
+      }
+    }
+    b->insts = std::move(list);
+  }
+}
+
 }  // namespace
 
 void promoteAllocas(Module& m, Function* f) {
   if (f->blocks.empty()) return;
   SplitRewrite split;
   splitAggregates(m, f, split);
+  wholeVectorAccesses(m, f);
   const std::vector<BasicBlock*>& blocks = f->blocks;
   const size_t n = blocks.size();
 

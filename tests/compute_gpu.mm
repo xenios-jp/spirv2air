@@ -120,6 +120,30 @@ bool testTables(const Context& c, const char* path) {
   return true;
 }
 
+bool testLanes(const Context& c, const char* path) {
+  const char* test = "lanes";
+  spirv2air::Options options;
+  options.bindings = {{0, 0, 0, 0}};
+  id<MTLComputePipelineState> pso = makePipeline(c, test, path, options, 64);
+  if (!pso) return false;
+  const unsigned n = 4 * 64;
+  std::vector<uint32_t> init(n, 0xFFFFFFFFu);
+  id<MTLBuffer> out = makeBuffer(c, init.data(), n * 4);
+  id<MTLCommandBuffer> cb = [c.queue commandBuffer];
+  id<MTLComputeCommandEncoder> e = [cb computeCommandEncoder];
+  [e setComputePipelineState:pso];
+  [e setBuffer:out offset:0 atIndex:0];
+  [e dispatchThreadgroups:MTLSizeMake(4, 1, 1) threadsPerThreadgroup:MTLSizeMake(64, 1, 1)];
+  [e endEncoding];
+  if (!wait(cb, test)) return false;
+  const uint32_t* v = static_cast<const uint32_t*>(out.contents);
+  for (unsigned g = 0; g < n; ++g) {
+    uint32_t a = g & 7, want = a + 10 * (a + 1) + 300 + 50000;
+    check(v[g] == want, test, "lanes", g, v[g], want);
+  }
+  return true;
+}
+
 bool testShared(const Context& c, const char* path) {
   const char* test = "shared";
   spirv2air::Options options;
@@ -772,10 +796,10 @@ bool testAtomicExtra(const Context& c, const char* path) {
 }  // namespace
 
 int main(int argc, char** argv) {
-  if (argc != 15)
+  if (argc != 16)
     return fprintf(stderr, "usage: compute_gpu ids.spv shared.spv atomics.spv fetch.spv bits.spv ieee.spv pack.spv "
                            "strictmul.spv integer.spv float_math.spv packing.spv atomic_extra.spv strictmul_none.spv "
-                           "tables.spv\n"),
+                           "tables.spv lanes.spv\n"),
            2;
   @autoreleasepool {
     id<MTLDevice> device = MTLCreateSystemDefaultDevice();
@@ -794,9 +818,10 @@ int main(int argc, char** argv) {
     ran = testAtomicExtra(c, argv[12]) && ran;
     ran = testStrictMul(c, argv[13], true) && ran;
     ran = testTables(c, argv[14]) && ran;
+    ran = testLanes(c, argv[15]) && ran;
     if (!ran || failures)
       return fprintf(stderr, "compute_gpu: %d value failures%s\n", failures, ran ? "" : ", setup failed"), 1;
-    printf("compute_gpu: ids, barriers, atomics, IEEE, numeric ops, packing, image queries and tables match\n");
+    printf("compute_gpu: ids, barriers, atomics, IEEE, numeric ops, packing, image queries, tables and lanes match\n");
   }
   return 0;
 }

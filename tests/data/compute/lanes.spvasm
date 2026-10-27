@@ -1,0 +1,83 @@
+; Compute test shader for tests/compute_gpu.mm: a vector variable written one component at a time and read whole, and
+; a struct variable initialized null with one component of its vector member written. Both promote to registers.
+; With g = global invocation and a = g & 7:
+;   out[g] = a + 10 * (a + 1) + 100 * 3 + 1000 * 0 + 10000 * 5 + 100000 * 0
+               OpCapability Shader
+               OpMemoryModel Logical GLSL450
+               OpEntryPoint GLCompute %main "main" %gid
+               OpExecutionMode %main LocalSize 64 1 1
+               OpDecorate %gid BuiltIn GlobalInvocationId
+               OpDecorate %arr ArrayStride 4
+               OpMemberDecorate %Out 0 Offset 0
+               OpDecorate %Out Block
+               OpDecorate %out DescriptorSet 0
+               OpDecorate %out Binding 0
+       %void = OpTypeVoid
+       %fnty = OpTypeFunction %void
+       %uint = OpTypeInt 32 0
+      %uint3 = OpTypeVector %uint 3
+      %uint4 = OpTypeVector %uint 4
+        %arr = OpTypeRuntimeArray %uint
+        %Out = OpTypeStruct %arr
+      %Inner = OpTypeStruct %uint4
+         %u0 = OpConstant %uint 0
+         %u1 = OpConstant %uint 1
+         %u2 = OpConstant %uint 2
+         %u3 = OpConstant %uint 3
+         %u5 = OpConstant %uint 5
+         %u7 = OpConstant %uint 7
+        %u10 = OpConstant %uint 10
+       %u100 = OpConstant %uint 100
+      %u1000 = OpConstant %uint 1000
+     %u10000 = OpConstant %uint 10000
+    %u100000 = OpConstant %uint 100000
+      %vnull = OpConstantNull %uint4
+      %snull = OpConstantNull %Inner
+    %p_sb_out = OpTypePointer StorageBuffer %Out
+     %p_sb_u = OpTypePointer StorageBuffer %uint
+    %p_in_u3 = OpTypePointer Input %uint3
+   %p_fn_u4 = OpTypePointer Function %uint4
+   %p_fn_in = OpTypePointer Function %Inner
+     %p_fn_u = OpTypePointer Function %uint
+        %out = OpVariable %p_sb_out StorageBuffer
+        %gid = OpVariable %p_in_u3 Input
+       %main = OpFunction %void None %fnty
+      %entry = OpLabel
+          %v = OpVariable %p_fn_u4 Function %vnull
+          %s = OpVariable %p_fn_in Function %snull
+          %g = OpLoad %uint3 %gid
+         %gx = OpCompositeExtract %uint %g 0
+          %a = OpBitwiseAnd %uint %gx %u7
+         %vx = OpAccessChain %p_fn_u %v %u0
+               OpStore %vx %a
+         %ra = OpLoad %uint %vx
+         %a1 = OpIAdd %uint %ra %u1
+         %vy = OpAccessChain %p_fn_u %v %u1
+               OpStore %vy %a1
+         %vz = OpAccessChain %p_fn_u %v %u2
+               OpStore %vz %u3
+         %vv = OpLoad %uint4 %v
+         %x0 = OpCompositeExtract %uint %vv 0
+         %y0 = OpCompositeExtract %uint %vv 1
+         %z0 = OpCompositeExtract %uint %vv 2
+         %w0 = OpCompositeExtract %uint %vv 3
+         %y1 = OpIMul %uint %y0 %u10
+         %z1 = OpIMul %uint %z0 %u100
+         %w1 = OpIMul %uint %w0 %u1000
+         %sw = OpAccessChain %p_fn_u %s %u0 %u3
+               OpStore %sw %u5
+         %sm = OpAccessChain %p_fn_u4 %s %u0
+         %sv = OpLoad %uint4 %sm
+         %sx = OpCompositeExtract %uint %sv 0
+         %sww = OpCompositeExtract %uint %sv 3
+         %s1 = OpIMul %uint %sww %u10000
+         %s2 = OpIMul %uint %sx %u100000
+         %r0 = OpIAdd %uint %x0 %y1
+         %r1 = OpIAdd %uint %r0 %z1
+         %r2 = OpIAdd %uint %r1 %w1
+         %r3 = OpIAdd %uint %r2 %s1
+          %r = OpIAdd %uint %r3 %s2
+       %outp = OpAccessChain %p_sb_u %out %u0 %gx
+               OpStore %outp %r
+               OpReturn
+               OpFunctionEnd
