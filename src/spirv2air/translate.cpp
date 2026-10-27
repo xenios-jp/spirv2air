@@ -203,6 +203,13 @@ class Translator {
     const auto* c = static_cast<const Constant*>(v);
     return c->ck == Constant::Int && c->bits != 0;
   }
+  static bool constU32(const Value* v, uint32_t& out) {
+    if (v->vk != Value::Const || v->type->kind != Type::Int) return false;
+    const auto* c = static_cast<const Constant*>(v);
+    if (c->ck != Constant::Int && c->ck != Constant::Null) return false;
+    out = c->ck == Constant::Int ? static_cast<uint32_t>(c->bits) : 0;
+    return true;
+  }
   Value* cint(int64_t v) { return m_.constInt(i32_, v); }
   Value* shiftAmount(Value* v);
   Value* integerDivide(Value* x, Value* y, uint16_t op);
@@ -1929,7 +1936,19 @@ void Translator::translate(const Inst& in) {
     case spv::OpBitFieldUExtract: {
       const char* name = in.op == spv::OpBitFieldSExtract ? "air.extract_bits.s.i32" : "air.extract_bits.u.i32";
       // Count 0 yields 0 (air.extract_bits leaves the result unspecified for it).
-      set(perComponent({op(2), op(3), op(4)}, [&](const std::vector<Value*>& s) {
+      set(perComponent({op(2), op(3), op(4)}, [&](const std::vector<Value*>& s) -> Value* {
+        // A constant field is shifts and masks, which fold once function
+        // constants are specialized; the GPU compiler never folds air.extract_bits.
+        uint32_t offset, count;
+        if (constU32(s[1], offset) && constU32(s[2], count) && count && offset + count <= 32) {
+          if (count == 32) return s[0];
+          if (in.op == spv::OpBitFieldSExtract) {
+            Value* high = 32 - offset - count ? b_->binop(Shl, s[0], cint(32 - offset - count)) : s[0];
+            return b_->binop(AShr, high, cint(32 - count));
+          }
+          Value* low = offset ? b_->binop(LShr, s[0], cint(offset)) : s[0];
+          return offset + count == 32 ? low : b_->binop(And, low, cint((1u << count) - 1));
+        }
         Value* r = intrinsic(name, i32_, s, AttrClass::Bits);
         return countIsNonZeroConst(s[2]) ? r : b_->select(b_->icmp(I_EQ, s[2], cint(0)), cint(0), r);
       }));

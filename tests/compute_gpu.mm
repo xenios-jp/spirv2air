@@ -771,11 +771,48 @@ bool testAtomicExtra(const Context& c, const char* path) {
 
 }  // namespace
 
+// Constant-field extracts become shifts and masks; check them against the
+// field definitions, including fields that reach bit 31 and a full-width one.
+bool testFields(const Context& c, const char* path) {
+  const char* test = "fields";
+  spirv2air::Options options;
+  options.bindings = {{0, 0, 0, 0}, {0, 1, 1, 0}};
+  id<MTLComputePipelineState> pso = makePipeline(c, test, path, options, 64);
+  if (!pso) return false;
+  const unsigned n = 64;
+  std::vector<uint32_t> in(n);
+  for (unsigned i = 0; i < n; ++i) in[i] = i < 4 ? uint32_t(0x80000000u >> i) ^ (i & 1 ? 0xFFFFFFFFu : 0) : 0x9E3779B9u * (i + 1);
+  std::vector<uint32_t> outInit(n * 8, 0xDEADBEEFu);
+  id<MTLBuffer> bin = makeBuffer(c, in.data(), n * 4), bout = makeBuffer(c, outInit.data(), n * 32);
+  id<MTLCommandBuffer> cb = [c.queue commandBuffer];
+  id<MTLComputeCommandEncoder> e = [cb computeCommandEncoder];
+  [e setComputePipelineState:pso];
+  [e setBuffer:bin offset:0 atIndex:0];
+  [e setBuffer:bout offset:0 atIndex:1];
+  [e dispatchThreadgroups:MTLSizeMake(1, 1, 1) threadsPerThreadgroup:MTLSizeMake(64, 1, 1)];
+  [e endEncoding];
+  if (!wait(cb, test)) return false;
+  const uint32_t* o = static_cast<const uint32_t*>(bout.contents);
+  const struct { bool sign; unsigned offset, count; } fields[] = {
+      {false, 0, 8}, {false, 30, 2}, {false, 4, 28}, {false, 0, 32},
+      {true, 0, 8},  {true, 30, 2},  {true, 4, 28},  {true, 13, 5}};
+  for (unsigned i = 0; i < n; ++i) {
+    for (unsigned k = 0; k < 8; ++k) {
+      unsigned offset = fields[k].offset, count = fields[k].count;
+      uint64_t bits = (uint64_t(in[i]) >> offset) & ((uint64_t(1) << count) - 1);
+      if (fields[k].sign && (bits >> (count - 1)) & 1) bits |= ~((uint64_t(1) << count) - 1);
+      check(o[8 * i + k] == uint32_t(bits), test, fields[k].sign ? "BitFieldSExtract" : "BitFieldUExtract", i,
+            o[8 * i + k], uint32_t(bits));
+    }
+  }
+  return true;
+}
+
 int main(int argc, char** argv) {
-  if (argc != 15)
+  if (argc != 16)
     return fprintf(stderr, "usage: compute_gpu ids.spv shared.spv atomics.spv fetch.spv bits.spv ieee.spv pack.spv "
                            "strictmul.spv integer.spv float_math.spv packing.spv atomic_extra.spv strictmul_none.spv "
-                           "tables.spv\n"),
+                           "tables.spv fields.spv\n"),
            2;
   @autoreleasepool {
     id<MTLDevice> device = MTLCreateSystemDefaultDevice();
@@ -794,9 +831,10 @@ int main(int argc, char** argv) {
     ran = testAtomicExtra(c, argv[12]) && ran;
     ran = testStrictMul(c, argv[13], true) && ran;
     ran = testTables(c, argv[14]) && ran;
+    ran = testFields(c, argv[15]) && ran;
     if (!ran || failures)
       return fprintf(stderr, "compute_gpu: %d value failures%s\n", failures, ran ? "" : ", setup failed"), 1;
-    printf("compute_gpu: ids, barriers, atomics, IEEE, numeric ops, packing, image queries and tables match\n");
+    printf("compute_gpu: ids, barriers, atomics, IEEE, numeric ops, packing, image queries, tables and bit fields match\n");
   }
   return 0;
 }

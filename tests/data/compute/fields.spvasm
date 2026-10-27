@@ -1,0 +1,87 @@
+; Compute test shader for tests/compute_gpu.mm: OpBitFieldUExtract and OpBitFieldSExtract with
+; constant Offset and Count, which spirv2air lowers to shifts and masks.
+; For x = in[g], one invocation per g, out[8g+k] = UExtract(x, 0, 8), UExtract(x, 30, 2), UExtract(x, 4, 28), UExtract(x, 0, 32), SExtract(int(x), 0, 8), SExtract(int(x), 30, 2), SExtract(int(x), 4, 28), SExtract(int(x), 13, 5).
+               OpCapability Shader
+               OpMemoryModel Logical GLSL450
+               OpEntryPoint GLCompute %main "main" %gid
+               OpExecutionMode %main LocalSize 64 1 1
+               OpDecorate %gid BuiltIn GlobalInvocationId
+               OpDecorate %arr ArrayStride 4
+               OpMemberDecorate %Buf 0 Offset 0
+               OpDecorate %Buf Block
+               OpDecorate %inb DescriptorSet 0
+               OpDecorate %inb Binding 0
+               OpDecorate %outb DescriptorSet 0
+               OpDecorate %outb Binding 1
+       %void = OpTypeVoid
+       %fnty = OpTypeFunction %void
+        %int = OpTypeInt 32 1
+       %uint = OpTypeInt 32 0
+      %uint3 = OpTypeVector %uint 3
+        %arr = OpTypeRuntimeArray %uint
+        %Buf = OpTypeStruct %arr
+         %u0 = OpConstant %uint 0
+         %u1 = OpConstant %uint 1
+         %u2 = OpConstant %uint 2
+         %u3 = OpConstant %uint 3
+         %u4 = OpConstant %uint 4
+         %u5 = OpConstant %uint 5
+         %u6 = OpConstant %uint 6
+         %u7 = OpConstant %uint 7
+         %u8 = OpConstant %uint 8
+        %u13 = OpConstant %uint 13
+        %u28 = OpConstant %uint 28
+        %u30 = OpConstant %uint 30
+        %u32 = OpConstant %uint 32
+  %p_sb_buf = OpTypePointer StorageBuffer %Buf
+    %p_sb_u = OpTypePointer StorageBuffer %uint
+   %p_in_u3 = OpTypePointer Input %uint3
+        %inb = OpVariable %p_sb_buf StorageBuffer
+       %outb = OpVariable %p_sb_buf StorageBuffer
+        %gid = OpVariable %p_in_u3 Input
+       %main = OpFunction %void None %fnty
+      %entry = OpLabel
+          %g = OpLoad %uint3 %gid
+         %gx = OpCompositeExtract %uint %g 0
+         %ip = OpAccessChain %p_sb_u %inb %u0 %gx
+          %x = OpLoad %uint %ip
+         %xs = OpBitcast %int %x
+       %base = OpIMul %uint %gx %u8
+         %r0 = OpBitFieldUExtract %uint %x %u0 %u8
+         %i0 = OpIAdd %uint %base %u0
+         %p0 = OpAccessChain %p_sb_u %outb %u0 %i0
+               OpStore %p0 %r0
+         %r1 = OpBitFieldUExtract %uint %x %u30 %u2
+         %i1 = OpIAdd %uint %base %u1
+         %p1 = OpAccessChain %p_sb_u %outb %u0 %i1
+               OpStore %p1 %r1
+         %r2 = OpBitFieldUExtract %uint %x %u4 %u28
+         %i2 = OpIAdd %uint %base %u2
+         %p2 = OpAccessChain %p_sb_u %outb %u0 %i2
+               OpStore %p2 %r2
+         %r3 = OpBitFieldUExtract %uint %x %u0 %u32
+         %i3 = OpIAdd %uint %base %u3
+         %p3 = OpAccessChain %p_sb_u %outb %u0 %i3
+               OpStore %p3 %r3
+         %s4 = OpBitFieldSExtract %int %xs %u0 %u8
+         %r4 = OpBitcast %uint %s4
+         %i4 = OpIAdd %uint %base %u4
+         %p4 = OpAccessChain %p_sb_u %outb %u0 %i4
+               OpStore %p4 %r4
+         %s5 = OpBitFieldSExtract %int %xs %u30 %u2
+         %r5 = OpBitcast %uint %s5
+         %i5 = OpIAdd %uint %base %u5
+         %p5 = OpAccessChain %p_sb_u %outb %u0 %i5
+               OpStore %p5 %r5
+         %s6 = OpBitFieldSExtract %int %xs %u4 %u28
+         %r6 = OpBitcast %uint %s6
+         %i6 = OpIAdd %uint %base %u6
+         %p6 = OpAccessChain %p_sb_u %outb %u0 %i6
+               OpStore %p6 %r6
+         %s7 = OpBitFieldSExtract %int %xs %u13 %u5
+         %r7 = OpBitcast %uint %s7
+         %i7 = OpIAdd %uint %base %u7
+         %p7 = OpAccessChain %p_sb_u %outb %u0 %i7
+               OpStore %p7 %r7
+               OpReturn
+               OpFunctionEnd
