@@ -173,3 +173,25 @@ Anything outside the subset above is rejected with a diagnostic. Some unrelated 
   - [CLI](docs/cli.md) covers the command-line tool.
 - [CONTRIBUTING.md](CONTRIBUTING.md) covers the test policy, the verifier build and the debugging switches.
 - Licence: [LICENSE](LICENSE).
+
+### Ordered framebuffer attachment feedback
+
+`GraphicsBindings::framebufferFetchMask` explicitly maps `InputAttachmentIndex N`
+onto Metal color attachment N (bits 0–7). The default mask is zero and rejects
+input attachments. This is a host integration contract, not a general Vulkan
+subpass implementation: the caller must bind the corresponding color attachment,
+check raster-order-group support, and disable fixed-function blending when the
+shader performs blending. Include the mask in shader cache keys.
+
+The fragment-only subset accepts non-arrayed, non-depth, float `SubpassData`
+images with unknown format and `Sampled=2`. `OpImageRead` must return float4 and
+use constant zero int2 coordinates. Multisampled reads must directly use the
+current `SampleId`; arbitrary sample reads and additional image operands are
+rejected. Every attachment requires a matching float4 color output. Both sides
+use raster order group zero, preserving feedback between overlapping primitives
+within a draw. No texture heap or descriptor entry is consumed for an attachment.
+
+`feedback_gpu` checks 100 overlapping primitives in one draw followed by 20 in a
+second draw at 1×/2×/4× MSAA. A second case seeds distinct per-sample values and
+uses `SampleId` only for the attachment read. These tests establish ordered
+feedback, not a guest render-target encoding or blend implementation.

@@ -1,0 +1,45 @@
+; Ordered current-sample attachment feedback. One hundred overlapping triangles
+; followed by twenty more add (30,15,7.5*(sample+1),30) to a cleared attachment.
+OpCapability Shader
+OpCapability InputAttachment
+OpCapability SampleRateShading
+OpMemoryModel Logical GLSL450
+OpEntryPoint Fragment %main "main" %sid %out
+OpExecutionMode %main OriginUpperLeft
+OpDecorate %sid BuiltIn SampleId
+OpDecorate %sid Flat
+OpDecorate %out Location 0
+OpDecorate %previous DescriptorSet 3
+OpDecorate %previous Binding 0
+OpDecorate %previous InputAttachmentIndex 0
+%void = OpTypeVoid
+%fn = OpTypeFunction %void
+%float = OpTypeFloat 32
+%int = OpTypeInt 32 1
+%int2 = OpTypeVector %int 2
+%float4 = OpTypeVector %float 4
+%image = OpTypeImage %float SubpassData 0 0 1 2 Unknown
+%p_image = OpTypePointer UniformConstant %image
+%p_int = OpTypePointer Input %int
+%p_out = OpTypePointer Output %float4
+%zero = OpConstantNull %int2
+%one = OpConstant %int 1
+%quarter = OpConstant %float 0.25
+%eighth = OpConstant %float 0.125
+%sixteenth = OpConstant %float 0.0625
+%previous = OpVariable %p_image UniformConstant
+%sid = OpVariable %p_int Input
+%out = OpVariable %p_out Output
+%main = OpFunction %void None %fn
+%entry = OpLabel
+%s = OpLoad %int %sid
+%im = OpLoad %image %previous
+%old = OpImageRead %float4 %im %zero Sample %s
+%sp = OpIAdd %int %s %one
+%sf = OpConvertSToF %float %sp
+%blue = OpFMul %float %sf %sixteenth
+%delta = OpCompositeConstruct %float4 %quarter %eighth %blue %quarter
+%new = OpFAdd %float4 %old %delta
+OpStore %out %new
+OpReturn
+OpFunctionEnd

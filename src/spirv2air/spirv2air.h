@@ -68,6 +68,11 @@ struct GraphicsBindings {
   uint32_t textureIndexStride = 8, textureIndexOffset = 0, samplerIndexOffset = 4;
   // Heap records hold 64-bit handles. Defaults: {buffer address, texture handle, metadata}.
   uint32_t descriptorStride = 24, textureHandleOffset = 8, samplerHandleOffset = 0;
+  // Opt-in ordered framebuffer feedback: InputAttachmentIndex N maps to Metal color(N).
+  // Float4 SubpassData reads must use zero coordinates and, for MSAA, the current SampleId.
+  // The caller binds the matching color attachment and disables fixed-function blending.
+  // Include this mask in shader cache keys. Zero preserves the default resource ABI.
+  uint32_t framebufferFetchMask = 0;
 };
 
 // Target platform. The default, macOS 14, reproduces the original output byte for byte. iOS and iOS Simulator write

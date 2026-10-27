@@ -112,6 +112,7 @@ struct SType {
 
 struct Decorations {
   uint32_t builtin = kNone, location = kNone, binding = kNone, set = kNone, stride = 0;
+  uint32_t attachment = kNone;
   bool invariant = false, centroid = false, flat = false, noperspective = false, sample = false;
   bool bufferBlock = false, nonWritable = false;  // BufferBlock on a struct type; NonWritable on a variable
   bool noContraction = false;
@@ -124,7 +125,7 @@ struct MemberDecorations {
 
 // Where an OpVariable or access chain points.
 struct Pointer {
-  enum Kind : uint8_t { Invalid, Private, Buffer, Resource, FunctionConstant } kind = Invalid;
+  enum Kind : uint8_t { Invalid, Private, Buffer, Resource, Attachment, FunctionConstant } kind = Invalid;
   uint32_t type = kNone;      // SPIR-V pointee type
   Value* ptr = nullptr;       // Private: pointer to type's LLVM type; Buffer: i8 addrspace(N)* base
   Value* offset = nullptr;    // Buffer: i64 byte offset from ptr
@@ -264,6 +265,8 @@ class Translator {
   std::map<std::string, Function*> decls_;
   std::map<uint32_t, std::pair<Value*, Value*>> sampledImages_;  // id -> (texture, sampler)
   std::map<uint32_t, uint32_t> sampledImageType_;                 // id -> SPIR-V image type
+  std::map<uint32_t, uint32_t> attachmentArgs_;  // input attachment variable -> AIR argument
+  std::set<uint32_t> sampleIdLoads_;
   std::map<uint32_t, uint32_t> loadedImageType_;                  // compute: id of a loaded image -> its type
 
   spv::ExecutionModel model_ = spv::ExecutionModelMax;
@@ -416,7 +419,7 @@ void Translator::decode() {
         uint32_t c = in.operand(0);
         if (c != spv::CapabilityShader && c != spv::CapabilityDenormFlushToZero &&
             c != spv::CapabilityDerivativeControl && c != spv::CapabilityDemoteToHelperInvocation &&
-            c != spv::CapabilityImageQuery && c != spv::CapabilityTessellation &&
+            c != spv::CapabilityInputAttachment && c != spv::CapabilityImageQuery && c != spv::CapabilityTessellation &&
             c != spv::CapabilitySampleRateShading && c != spv::CapabilityClipDistance &&
             c != spv::CapabilityCullDistance && c != spv::CapabilityFloatControls2 &&
             c != spv::CapabilityFragmentBarycentricKHR)
@@ -479,6 +482,7 @@ void Translator::decode() {
             d.explicitMathMode = true;
             break;
           case spv::DecorationBuiltIn: d.builtin = in.operand(2); break;
+          case spv::DecorationInputAttachmentIndex: d.attachment = in.operand(2); break;
           case spv::DecorationLocation: d.location = in.operand(2); break;
           case spv::DecorationBinding: d.binding = in.operand(2); break;
           case spv::DecorationDescriptorSet: d.set = in.operand(2); break;
@@ -636,6 +640,13 @@ void Translator::declareType(const Inst& in) {
         break;
       }
       if (type(t.elem).op != spv::OpTypeFloat) fail("non-float image");
+      if (t.dim == spv::DimSubpassData) {
+        if (model_ != spv::ExecutionModelFragment || t.arrayed || in.operand(3) != 0 ||
+            in.operand(6) != 2 || in.operand(7) != spv::ImageFormatUnknown)
+          fail("input attachment must be non-arrayed fragment SubpassData");
+        t.multisampled = in.operand(5) != 0;
+        break;
+      }
       if (in.operand(5)) fail("multisampled image");
       if (t.dim != spv::Dim2D && t.dim != spv::DimCube && !(t.dim == spv::Dim3D && !t.arrayed))
         fail("image dimension " + std::to_string(t.dim) + (t.arrayed ? " arrayed" : ""));
@@ -743,6 +754,14 @@ void Translator::buildSignature() {
           fail("storage buffer " + what);
         break;
       case spv::StorageClassUniformConstant: {
+        if (type(pt.elem).op == spv::OpTypeImage && type(pt.elem).dim == spv::DimSubpassData) {
+          if (d.attachment >= 8 || !(options_.graphics.framebufferFetchMask & (1u << d.attachment)))
+            fail("input attachment requires explicit framebufferFetchMask mapping");
+          for (auto& entry : attachmentArgs_)
+            if (decor_[entry.first].attachment == d.attachment) fail("duplicate input attachment");
+          attachmentArgs_[var] = 0;
+          break;
+        }
         if (d.set != (vertex ? options_.graphics.vertexTexturesSet : options_.graphics.fragmentTexturesSet)) fail("resource set of " + what);
         uint16_t op = type(pt.elem).op;
         if (op == spv::OpTypeSampler) usesSamplers_ = true;
@@ -818,6 +837,15 @@ void Translator::buildSignature() {
          S("air.arg_type_name"), S("float3"), S("air.arg_name"), S("linear_barycentrics")}));
   }
   addSampleInputs(sampleId, sampleMaskIn);
+  for (auto& [var, arg] : attachmentArgs_) {
+    const auto& d = decor_[var];
+    if (!outputs.count(d.attachment)) fail("input attachment requires matching color output");
+    if (type(type(varType_[var]).elem).multisampled && sampleId == kNone)
+      fail("multisampled input attachment requires SampleId");
+    arg = addArg(m_.vecTy(f32_, 4), {S("air.render_target"), I(d.attachment),
+        S("air.raster_order_group"), I(0), S("air.arg_type_name"), S("float4"),
+        S("air.arg_name"), S("previous" + std::to_string(d.attachment))});
+  }
   auto indirect = [&](int location, const char* typeName) -> std::vector<Metadata*> {
     return {S("air.indirect_buffer"), S("air.location_index"), I(location), I(1), S("air.read"),
             S("air.address_space"), I(2), S("air.struct_type_info"), m_.mdNode({}), S("air.arg_type_name"),
@@ -857,10 +885,15 @@ void Translator::buildSignature() {
                 false);
     } else {
       if (!isFloatVector(t) && !isIntVector(t)) fail("output type");
-      addOutput(var, -1, t,
-                {S("air.render_target"), I(location), I(0), S("air.arg_type_name"),
-                 S(varyingTypeName(type(varType_[var]).elem)), S("air.arg_name"), S("rt" + n)},
-                false);
+      std::vector<Metadata*> md = {S("air.render_target"), I(location), I(0)};
+      for (auto& entry : attachmentArgs_) {
+        if (decor_[entry.first].attachment != location) continue;
+        if (t != m_.vecTy(f32_, 4)) fail("framebuffer feedback output must be float4");
+        md.insert(md.end(), {S("air.raster_order_group"), I(0)});
+      }
+      md.insert(md.end(), {S("air.arg_type_name"), S(varyingTypeName(type(varType_[var]).elem)),
+                           S("air.arg_name"), S("rt" + n)});
+      addOutput(var, -1, t, std::move(md), false);
     }
   }
   if (perVertex != kNone) {
@@ -1124,7 +1157,9 @@ void Translator::buildEntry() {
         p.offset = m_.constInt(i64_, 0);
         break;
       }
-      case spv::StorageClassUniformConstant: p.kind = Pointer::Resource; break;
+      case spv::StorageClassUniformConstant:
+        p.kind = attachmentArgs_.count(var) ? Pointer::Attachment : Pointer::Resource;
+        break;
       case spv::StorageClassInput:
       case spv::StorageClassOutput: {
         Type* t = llvmType(pt.elem);
@@ -1277,6 +1312,8 @@ void Translator::finalizeMetadata() {
     m_.addNamedMD("air.language_version", {N({S("Metal"), I(3), I(1), I(0)})});
     return;
   }
+  if (!attachmentArgs_.empty())
+    m_.addNamedMD("air.compile_options", {N({S("air.compile.framebuffer_fetch_enable")})});
   for (const Output& o : outputs_) outs.push_back(N(o.md));
   bool vertex = model_ != spv::ExecutionModelFragment;  // vertex or post-tessellation vertex
   std::vector<Metadata*> fn = {m_.mdValue(main_), N(outs), N(args)};
@@ -1443,6 +1480,7 @@ Value* Translator::load(const Pointer& p) {
     case Pointer::Private: return b_->load(llvmType(p.type), p.ptr, 4);
     case Pointer::Buffer: return loadBuffer(p.type, p.ptr, p.addrSpace, p.offset);
     case Pointer::Resource: return loadResource(p);
+    case Pointer::Attachment: return main_->args[attachmentArgs_.at(p.variable)];
     case Pointer::FunctionConstant: {
       Value* v = functionConstant(decor_[p.variable].binding);
       const SType& t = type(p.type);
@@ -1731,7 +1769,10 @@ void Translator::translate(const Inst& in) {
     // ---- memory
     case spv::OpLoad:
       set(load(ptrs_[in.operand(2)]));
-      if (ptrs_[in.operand(2)].kind == Pointer::Resource) loadedImageType_[res()] = ptrs_[in.operand(2)].type;
+      if (ptrs_[in.operand(2)].kind == Pointer::Resource || ptrs_[in.operand(2)].kind == Pointer::Attachment)
+        loadedImageType_[res()] = ptrs_[in.operand(2)].type;
+      if (ptrs_[in.operand(2)].variable != kNone &&
+          decor_[ptrs_[in.operand(2)].variable].builtin == spv::BuiltInSampleId) sampleIdLoads_.insert(res());
       break;
     case spv::OpStore: store(ptrs_[in.operand(0)], op(1)); break;
     case spv::OpAccessChain:
@@ -2103,6 +2144,26 @@ void Translator::translate(const Inst& in) {
     case spv::OpAtomicExchange:
       set(atomic(in));
       break;
+    case spv::OpImageRead: {
+      auto image = loadedImageType_.find(in.operand(2));
+      if (image == loadedImageType_.end() || type(image->second).dim != spv::DimSubpassData)
+        fail("OpImageRead requires a framebuffer input attachment");
+      if (rt() != m_.vecTy(f32_, 4)) fail("input attachment read must return float4");
+      if (!isConstant(in.operand(3))) fail("input attachment requires zero coordinates");
+      Constant* c = consts_[in.operand(3)];
+      bool zero = c->ck == Constant::Null;
+      if (c->ck == Constant::Aggregate) {
+        zero = c->ops.size() == 2;
+        for (Constant* lane : c->ops) zero &= lane->ck == Constant::Int && lane->bits == 0;
+      }
+      if (!zero || c->type != m_.vecTy(i32_, 2)) fail("input attachment requires zero int2 coordinates");
+      if (type(image->second).multisampled) {
+        if (in.wc != 7 || in.operand(4) != spv::ImageOperandsSampleMask || !sampleIdLoads_.count(in.operand(5)))
+          fail("input attachment can only read the current SampleId");
+      } else if (in.wc != 5) fail("single-sample input attachment operands");
+      set(op(2));
+      break;
+    }
     case spv::OpImageFetch:
       set(fetch(in));
       break;
