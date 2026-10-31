@@ -1,0 +1,54 @@
+; Pixel interlock on a raster-ordered buffer, for tests/ordered_cpu.cpp and tests/ordered_gpu.mm: each fragment folds
+; its primitive's Flat value into its pixel's word, word = word * 31 + value, a non-atomic read-modify-write whose
+; result depends on the order of the primitives covering the pixel. The target is 16 pixels wide.
+               OpCapability Shader
+               OpCapability FragmentShaderPixelInterlockEXT
+               OpExtension "SPV_EXT_fragment_shader_interlock"
+               OpMemoryModel Logical GLSL450
+               OpEntryPoint Fragment %main "main" %coord %value
+               OpExecutionMode %main OriginUpperLeft
+               OpExecutionMode %main PixelInterlockOrderedEXT
+               OpDecorate %coord BuiltIn FragCoord
+               OpDecorate %value Location 0
+               OpDecorate %value Flat
+               OpDecorate %words ArrayStride 4
+               OpMemberDecorate %block 0 Offset 0
+               OpDecorate %block Block
+               OpDecorate %buffer DescriptorSet 0
+               OpDecorate %buffer Binding 2
+       %void = OpTypeVoid
+       %func = OpTypeFunction %void
+      %float = OpTypeFloat 32
+       %uint = OpTypeInt 32 0
+     %float4 = OpTypeVector %float 4
+     %uint_0 = OpConstant %uint 0
+    %uint_16 = OpConstant %uint 16
+    %uint_31 = OpConstant %uint 31
+      %words = OpTypeRuntimeArray %uint
+      %block = OpTypeStruct %words
+   %p_block = OpTypePointer StorageBuffer %block
+    %p_word = OpTypePointer StorageBuffer %uint
+   %p_in_f4 = OpTypePointer Input %float4
+    %p_in_u = OpTypePointer Input %uint
+      %coord = OpVariable %p_in_f4 Input
+      %value = OpVariable %p_in_u Input
+     %buffer = OpVariable %p_block StorageBuffer
+       %main = OpFunction %void None %func
+      %entry = OpLabel
+          %c = OpLoad %float4 %coord
+         %fx = OpCompositeExtract %float %c 0
+         %fy = OpCompositeExtract %float %c 1
+          %x = OpConvertFToU %uint %fx
+          %y = OpConvertFToU %uint %fy
+        %row = OpIMul %uint %y %uint_16
+      %index = OpIAdd %uint %row %x
+          %v = OpLoad %uint %value
+               OpBeginInvocationInterlockEXT
+          %p = OpAccessChain %p_word %buffer %uint_0 %index
+        %old = OpLoad %uint %p
+     %scaled = OpIMul %uint %old %uint_31
+        %new = OpIAdd %uint %scaled %v
+               OpStore %p %new
+               OpEndInvocationInterlockEXT
+               OpReturn
+               OpFunctionEnd

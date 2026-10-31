@@ -48,6 +48,12 @@ struct GraphicsBindings {
   int occlusionCounterBuffer = 7;
   uint32_t sharedMemorySet = 0, sharedMemoryBinding = 0;
   uint32_t occlusionCounterSet = 0, occlusionCounterBinding = 1;
+  // Fragment-stage raster-ordered storage buffer (xenia's EDRAM under fragment shader interlock): the
+  // StorageBuffer at (rasterOrderedSet, rasterOrderedBinding) becomes this direct device buffer in raster order
+  // group 0, so the fragments covering a pixel access it in primitive order. Pixel interlock, which it implements,
+  // is rejected while this is negative (default).
+  int rasterOrderedBuffer = -1;
+  uint32_t rasterOrderedSet = 0, rasterOrderedBinding = 2;
   uint32_t constantsSet = 1, constantBufferCount = 5;
   // "Fetch state" uniforms as Metal function constants. A Uniform variable in this descriptor set must be a block
   // holding one uint4; binding N becomes the uint4 function constant named "spirv2air_fc_<N>" (function constant index
