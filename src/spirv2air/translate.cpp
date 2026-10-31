@@ -419,8 +419,10 @@ void Translator::decode() {
             c != spv::CapabilityImageQuery && c != spv::CapabilityTessellation &&
             c != spv::CapabilitySampleRateShading && c != spv::CapabilityClipDistance &&
             c != spv::CapabilityCullDistance && c != spv::CapabilityFloatControls2 &&
-            c != spv::CapabilityFragmentBarycentricKHR)
+            c != spv::CapabilityFragmentBarycentricKHR && c != spv::CapabilityFragmentShaderPixelInterlockEXT)
           fail("capability " + std::to_string(c));
+        if (c == spv::CapabilityFragmentShaderPixelInterlockEXT && options_.graphics.rasterOrderedBuffer < 0)
+          fail("pixel interlock requires graphics.rasterOrderedBuffer");
         break;
       }
       case spv::OpExtInstImport:
@@ -454,6 +456,8 @@ void Translator::decode() {
           case spv::ExecutionModeVertexOrderCcw:
           case spv::ExecutionModeOriginUpperLeft:
           case spv::ExecutionModeDepthReplacing:
+          // Raster order groups order every access to the raster-ordered buffer, see OpBeginInvocationInterlockEXT.
+          case spv::ExecutionModePixelInterlockOrderedEXT:
             break;
           case spv::ExecutionModeDepthLess:
             depthQualifier_ = "air.less";
@@ -689,7 +693,7 @@ void Translator::buildSignature() {
   std::map<uint32_t, uint32_t> inputs, outputs;  // location -> variable
   uint32_t vertexIndex = kNone, primitiveId = kNone, fragCoord = kNone, frontFacing = kNone, perVertex = kNone,
            fragDepth = kNone, sampleMask = kNone, sampleMaskIn = kNone, sampleId = kNone, zpdCounter = kNone,
-           linearBarycentric = kNone;
+           linearBarycentric = kNone, rasterOrdered = kNone;
   for (uint32_t var : globals_) {
     const SType& pt = type(varType_[var]);
     const Decorations& d = decor_[var];
@@ -738,6 +742,10 @@ void Translator::buildSignature() {
             d.set == options_.graphics.occlusionCounterSet && d.binding == options_.graphics.occlusionCounterBinding &&
             zpdCounter == kNone)
           zpdCounter = var;
+        else if (!vertex && options_.graphics.rasterOrderedBuffer >= 0 &&
+                 d.set == options_.graphics.rasterOrderedSet && d.binding == options_.graphics.rasterOrderedBinding &&
+                 rasterOrdered == kNone)
+          rasterOrdered = var;
         else if (storageSlot(d) >= 0) {
         } else if (d.set != options_.graphics.sharedMemorySet || d.binding != options_.graphics.sharedMemoryBinding)
           fail("storage buffer " + what);
@@ -835,6 +843,12 @@ void Translator::buildSignature() {
         m_.ptrTy(i8_, 1), {S("air.buffer"), S("air.location_index"), I(options_.graphics.occlusionCounterBuffer), I(1), S("air.read_write"),
                            S("air.address_space"), I(1), S("air.arg_type_size"), I(1), S("air.arg_type_align_size"),
                            I(1), S("air.arg_type_name"), S("uchar"), S("air.arg_name"), S("zpd_counter")}));
+  if (rasterOrdered != kNone)
+    argOfInput_[rasterOrdered] = int(addArg(
+        m_.ptrTy(i8_, 1), {S("air.buffer"), S("air.location_index"), I(options_.graphics.rasterOrderedBuffer), I(1),
+                           S("air.read_write"), S("air.address_space"), I(1), S("air.raster_order_group"), I(0),
+                           S("air.arg_type_size"), I(1), S("air.arg_type_align_size"), I(1), S("air.arg_type_name"),
+                           S("uchar"), S("air.arg_name"), S("raster_ordered")}));
 
   // Outputs: varyings or colour targets in Location order, then position / depth / coverage. Unwritten
   // builtins are dropped when the module does not write them.
@@ -1725,6 +1739,11 @@ void Translator::translate(const Inst& in) {
   };
   switch (in.op) {
     case spv::OpNop: case spv::OpLine: case spv::OpNoLine: case spv::OpSelectionMerge: case spv::OpLoopMerge:
+      break;
+    // A raster order group orders a fragment's accesses to its resources after those of the earlier fragments at
+    // the pixel, which the interlock's critical section is there for. The interlocked accesses must all be to the
+    // raster-ordered buffer, which only pixel interlock admits (see OpCapability).
+    case spv::OpBeginInvocationInterlockEXT: case spv::OpEndInvocationInterlockEXT:
       break;
     case spv::OpUndef: set(m_.constUndef(rt())); break;
 

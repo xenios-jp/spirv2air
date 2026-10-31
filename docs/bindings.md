@@ -10,6 +10,7 @@ This is the host interface implemented by spirv2air, not a complete Vulkan descr
 | Shared read-only storage | set 0, binding 0, NonWritable member | Device pointer at top-level byte 48 |
 | Shared writable storage | set 0, binding 0 | Device pointer at top-level byte 56 |
 | Fragment occlusion counter | set 0, binding 1 | Direct device buffer 7 |
+| Fragment raster-ordered storage | set 0, binding 2 | Direct device buffer `rasterOrderedBuffer`, raster order group 0 (disabled by default) |
 | Vertex/tessellation textures and samplers | set 2 | Per-binding indices through top-level byte 64 |
 | Fragment textures and samplers | set 3 | Per-binding indices through top-level byte 72 |
 | Tessellation control points | One float array input by Location | Direct device buffer 6 |
@@ -17,6 +18,8 @@ This is the host interface implemented by spirv2air, not a complete Vulkan descr
 The top-level buffer is bound at `argumentBuffer=2`. The resource and sampler heaps use `resourceHeapBuffer=0` and `samplerHeapBuffer=1`. Pointer fields are 64-bit little-endian values, 8-byte aligned. The host allocates enough top-level storage for every configured slot it uses; the compiler does not allocate or populate these buffers.
 
 Uniform slots use `constantBaseOffset=0`, `constantStride=8`, `constantBufferCount=5`, and `constantsSet=1`. Shared-memory selection uses `sharedMemorySet=0`, `sharedMemoryBinding=0`, `sharedMemoryReadOffset=48`, and `sharedMemoryWriteOffset=56`. The counter uses `occlusionCounterSet=0`, `occlusionCounterBinding=1`, and `occlusionCounterBuffer=7`; setting the buffer negative disables its special mapping. A module requesting a disabled input is rejected.
+
+`rasterOrderedBuffer` (default -1, disabled; xenia's EDRAM uses 8) maps the StorageBuffer at `rasterOrderedSet=0`, `rasterOrderedBinding=2` of a fragment shader to that direct device buffer, declared in raster order group 0 like an MSL `[[raster_order_group(0)]]` buffer argument, so the fragments covering a pixel access it in primitive order. This is how `FragmentShaderPixelInterlockEXT` with `PixelInterlockOrderedEXT` translates: `OpBeginInvocationInterlockEXT` and `OpEndInvocationInterlockEXT` emit nothing, the raster order group orders the accesses instead, so the interlocked accesses must be to this buffer. A module declaring pixel interlock while the buffer is disabled is rejected. The host needs a device whose `areRasterOrderGroupsSupported` is true. tests/ordered_gpu.mm folds 64 overlapping primitives into every pixel non-atomically and checks primitive order against MSL.
 
 Stage resource sets are `vertexTexturesSet=2` and `fragmentTexturesSet=3`. Their index-buffer pointers are read from `vertexTextureIndicesOffset=64` or `fragmentTextureIndicesOffset=72`. Each binding's index record starts at `binding * textureIndexStride` (default 8); its texture and sampler indices are uint32 values at `textureIndexOffset=0` and `samplerIndexOffset=4`.
 
