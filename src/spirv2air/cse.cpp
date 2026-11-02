@@ -34,47 +34,81 @@ bool hasFunctionAttr(const AttrList* l, const Attr& a) {
 }
 
 // A call whose callee (or call site) carries the given function attribute.
-bool callHas(const Instruction* i, const char* name) {
-  const Attr a = Attr::get(name);
+bool callHas(const Instruction* i, const Attr& a) {
   if (i->ops.empty() || i->ops[0]->vk != Value::Func) return false;
   return hasFunctionAttr(static_cast<const Function*>(i->ops[0])->attrs, a) || hasFunctionAttr(i->attrs, a);
 }
 
 unsigned addrSpaceOf(const Value* ptr) { return ptr->type->kind == Type::Pointer ? ptr->type->n : ~0u; }
 
-struct Key {
-  Op op;
-  uint8_t sub, flags;
-  bool inbounds, tail;
-  uint32_t align;
-  const Type* type;
-  const Type* srcElemTy;
-  const AttrList* attrs;
-  std::vector<const Value*> ops;
-  std::vector<uint32_t> idx;
-
-  bool operator==(const Key& o) const {
-    return op == o.op && sub == o.sub && flags == o.flags && inbounds == o.inbounds && tail == o.tail &&
-           align == o.align && type == o.type && srcElemTy == o.srcElemTy && attrs == o.attrs && ops == o.ops &&
-           idx == o.idx;
-  }
-};
-
-struct KeyHash {
-  size_t operator()(const Key& k) const {
-    size_t h = size_t(k.op) | size_t(k.sub) << 8 | size_t(k.flags) << 16 | size_t(k.inbounds) << 24 |
-               size_t(k.tail) << 25 | size_t(k.align) << 32;
+// The table compares instructions by (op, sub, flags, type, operands, ...). An instruction's operands are resolved
+// before it enters the table and are not changed while it is there, so the table holds the instructions themselves.
+struct InstHash {
+  size_t operator()(const Instruction* i) const {
+    size_t h = size_t(i->op) | size_t(i->sub) << 8 | size_t(i->flags) << 16 | size_t(i->inbounds) << 24 |
+               size_t(i->tail) << 25 | size_t(i->align) << 32;
     auto mix = [&h](const void* p) { h = (h ^ reinterpret_cast<size_t>(p)) * 0x9E3779B97F4A7C15ull, h ^= h >> 29; };
-    mix(k.type), mix(k.srcElemTy), mix(k.attrs);
-    for (const Value* v : k.ops) mix(v);
-    for (uint32_t x : k.idx) h = (h ^ x) * 0x9E3779B97F4A7C15ull;
+    mix(i->type), mix(i->srcElemTy), mix(i->attrs);
+    for (const Value* v : i->ops) mix(v);
+    for (uint32_t x : i->idx) h = (h ^ x) * 0x9E3779B97F4A7C15ull;
     return h;
   }
 };
 
+struct InstEq {
+  bool operator()(const Instruction* a, const Instruction* b) const {
+    return a->op == b->op && a->sub == b->sub && a->flags == b->flags && a->inbounds == b->inbounds &&
+           a->tail == b->tail && a->align == b->align && a->type == b->type && a->srcElemTy == b->srcElemTy &&
+           a->attrs == b->attrs && a->ops.size() == b->ops.size() &&
+           std::equal(a->ops.begin(), a->ops.end(), b->ops.begin()) && a->idx == b->idx;
+  }
+};
+
+// A set of instructions, open addressing with linear probing. Entries leave in the reverse order they came in (the
+// undo log), so emptying an entry's slot restores the table exactly as it was before the entry went in.
+class Table {
+ public:
+  explicit Table(size_t n) {
+    size_t cap = 16;
+    while (cap < 2 * n) cap <<= 1;
+    slots_.assign(cap, {0, nullptr});
+    mask_ = cap - 1;
+  }
+
+  // The instruction equal to i already in the table; otherwise inserts i, sets `at` to its slot and returns null.
+  Instruction* insert(Instruction* i, size_t& at) {
+    const size_t h = InstHash()(i);
+    for (size_t k = h & mask_;; k = (k + 1) & mask_) {
+      Slot& s = slots_[k];
+      if (!s.inst) {
+        s = {h, i};
+        at = k;
+        return nullptr;
+      }
+      if (s.hash == h && InstEq()(s.inst, i)) return s.inst;
+    }
+  }
+
+  void erase(size_t at) { slots_[at].inst = nullptr; }
+
+ private:
+  struct Slot {
+    size_t hash;
+    Instruction* inst;
+  };
+  std::vector<Slot> slots_;
+  size_t mask_;
+};
+
 class Cse {
  public:
-  explicit Cse(Function* f) : f_(f) {}
+  Cse(Module& m, Function* f) : f_(f), table_(count(f)) {
+    ibase_ = m.allocTags(unsigned(count(f)));
+    n_ = 0;
+    for (BasicBlock* b : f->blocks)
+      for (Instruction* i : b->insts) i->tag = ibase_ + n_++;
+    repl_.assign(n_, nullptr);
+  }
 
   void run() {
     findWrites();
@@ -94,7 +128,7 @@ class Cse {
         stack.pop_back();
       }
     }
-    if (repl_.empty()) return;
+    if (!replaced_) return;
     // Uses the walk had not reached yet (phi entries along back edges).
     for (BasicBlock* b : f_->blocks)
       for (Instruction* i : b->insts)
@@ -102,9 +136,16 @@ class Cse {
   }
 
  private:
+  static size_t count(const Function* f) {
+    size_t n = 0;
+    for (const BasicBlock* b : f->blocks) n += b->insts.size();
+    return n;
+  }
+
   Value* resolve(Value* v) const {
-    auto it = repl_.find(v);
-    return it == repl_.end() ? v : it->second;  // replacements are recorded already resolved
+    unsigned k = v->tag - ibase_;
+    if (v->vk != Value::Inst || k >= n_ || !repl_[k]) return v;
+    return repl_[k];  // replacements are recorded already resolved
   }
 
   // Whether the function can write device memory: a store to address space 1 or a call that is neither readnone nor
@@ -113,7 +154,7 @@ class Cse {
     for (const BasicBlock* b : f_->blocks)
       for (const Instruction* i : b->insts) {
         if (i->op == Op::Store && addrSpaceOf(i->ops[1]) == 1) deviceWritten_ = true;
-        if (i->op == Op::Call && !callHas(i, "readnone") && !callHas(i, "readonly")) deviceWritten_ = true;
+        if (i->op == Op::Call && !callHas(i, readnone_) && !callHas(i, readonly_)) deviceWritten_ = true;
       }
   }
 
@@ -137,7 +178,7 @@ class Cse {
         return as == 2 || (as == 1 && !deviceWritten_);
       }
       case Op::Call:
-        return !i->type->isVoid() && callHas(i, "readnone");
+        return !i->type->isVoid() && callHas(i, readnone_);
       default:
         return false;
     }
@@ -145,26 +186,24 @@ class Cse {
 
   void visit(int bi) {
     BasicBlock* b = f_->blocks[bi];
-    std::vector<Instruction*> kept;
-    kept.reserve(b->insts.size());
+    kept_.clear();
     for (Instruction* i : b->insts) {
       if (i->op != Op::Phi)
         for (Value*& v : i->ops) v = resolve(v);
       if (!eligible(i)) {
-        kept.push_back(i);
+        kept_.push_back(i);
         continue;
       }
-      Key k{i->op, i->sub, i->flags, i->inbounds, i->tail, i->align, i->type, i->srcElemTy, i->attrs, {}, i->idx};
-      k.ops.assign(i->ops.begin(), i->ops.end());
-      auto [it, inserted] = table_.emplace(std::move(k), i);
-      if (inserted) {
-        undo_.push_back(it->first);
-        kept.push_back(i);
+      size_t at;
+      if (Instruction* same = table_.insert(i, at)) {
+        repl_[i->tag - ibase_] = same;
+        replaced_ = true;
       } else {
-        repl_.emplace(i, it->second);
+        undo_.push_back(at);
+        kept_.push_back(i);
       }
     }
-    b->insts = std::move(kept);
+    b->insts.swap(kept_);  // kept_ keeps the old storage for the next block
   }
 
   // Dominator tree of the blocks reachable from the entry (iterative CHK); children_ in function order.
@@ -225,18 +264,23 @@ class Cse {
   }
 
   Function* f_;
-  bool deviceWritten_ = false;
+  const Attr readnone_ = Attr::get("readnone"), readonly_ = Attr::get("readonly");
+  bool deviceWritten_ = false, replaced_ = false;
   std::vector<std::vector<int>> children_;
-  std::unordered_map<Key, Instruction*, KeyHash> table_;
-  std::vector<Key> undo_;
-  std::unordered_map<Value*, Value*> repl_;
+  Table table_;
+  std::vector<size_t> undo_;  // the slots of the table's entries in insertion order, emptied when their block's
+                              // subtree ends
+  std::vector<Instruction*> kept_;
+  uint32_t ibase_ = 0;
+  unsigned n_ = 0;
+  std::vector<Value*> repl_;  // by instruction tag: the available instruction that replaces it
 };
 
 }  // namespace
 
-void cseFunction(Module&, Function* f) {
+void cseFunction(Module& m, Function* f) {
   if (f->blocks.empty()) return;
-  Cse(f).run();
+  Cse(m, f).run();
 }
 
 }  // namespace spirv2air
