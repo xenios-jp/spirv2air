@@ -62,18 +62,21 @@ class Scalarizer {
  private:
   Module& m_;
   Function* f_;
-  // Per original instruction, created on first use.
+  // Per original instruction, created on first use. Up to 4 lanes are kept inline.
+  using Lanes = SmallVec<Value*, 4>;
+  using Insts = SmallVec<Instruction*, 4>;
   struct Info {
-    std::vector<Value*> lanes;                     // scalarized value -> its lane values
-    std::vector<Value*> extracted;                 // other vector -> its extractelements
-    std::vector<Instruction*> body, tail, extras;  // lane instructions, rebuilt-vector chain, extracts placed after it
+    Lanes lanes;               // scalarized value -> its lane values
+    Lanes extracted;           // other vector -> its extractelements
+    Insts body, tail, extras;  // lane instructions, rebuilt-vector chain, extracts placed after it
   };
   std::deque<Info> infos_;
   std::vector<uint32_t> info_;  // by instruction id: 1 + index into infos_, or 0
   uint32_t ibase_ = 0, bbase_ = 0;
   unsigned n_ = 0, total_ = 0;  // instructions numbered so far, and instructions in the function
-  std::unordered_map<const Value*, std::vector<Value*>> argExtracted_;  // arguments and other non-instruction vectors
+  std::unordered_map<const Value*, Lanes> argExtracted_;  // arguments and other non-instruction vectors
   std::vector<Instruction*> argExtras_, order_, phis_;
+  std::vector<Instruction*> phiPart_, postPhi_, rest_;  // rewriteBlock's lists, kept for their storage
   std::vector<char> removed_;  // by instruction id
   std::vector<Value*> repl_;   // by instruction id: its replacement, or null (only original instructions are replaced)
 
@@ -103,7 +106,7 @@ class Scalarizer {
     const Info* in = find(v);
     return in && !in->lanes.empty();
   }
-  std::vector<Value*>& lanesOf(const Value* v) { return find(v)->lanes; }
+  Lanes& lanesOf(const Value* v) { return find(v)->lanes; }
   Value* resolveRepl(Value* v) {
     for (unsigned k = id(v); k != ~0u && repl_[k]; k = id(v)) v = repl_[k];
     return v;
@@ -140,12 +143,15 @@ class Scalarizer {
       if (c->ck == Constant::Undef) return m_.constUndef(elem);
       if (c->ck == Constant::Poison) return m_.constPoison(elem);
     }
-    std::vector<Value*>& made = v->vk == Value::Inst ? get(v).extracted : argExtracted_[v];
-    if (made.empty()) made.assign(v->type->n, nullptr);
+    Lanes& made = v->vk == Value::Inst ? get(v).extracted : argExtracted_[v];
+    if (made.empty()) made.resize(v->type->n);
     if (!made[k]) {
       Instruction* x = m_.newInst(Op::ExtractElement, elem);
       x->ops = {v, m_.constInt(m_.intTy(32), k)};
-      (v->vk == Value::Inst ? get(v).extras : argExtras_).push_back(x);
+      if (v->vk == Value::Inst)
+        get(v).extras.push_back(x);
+      else
+        argExtras_.push_back(x);
       made[k] = x;
     }
     return made[k];
@@ -164,7 +170,8 @@ class Scalarizer {
     if (!isVector(i)) return;
     const unsigned n = i->type->n;
     Type* elem = i->type->elem;
-    std::vector<Value*> out(n);
+    Lanes out;
+    out.resize(n);
     switch (i->op) {
       case Op::Cast:
         if (!isVector(i->ops[0]) || i->ops[0]->type->n != n) return;
@@ -244,8 +251,8 @@ class Scalarizer {
   // The block with scalarized instructions replaced by their lanes, extracts after their definitions and rebuilt
   // vectors after their lanes (all of them after the block's phis), and every operand resolved through repl_.
   void rewriteBlock(BasicBlock* b) {
-    std::vector<Instruction*> phiPart, postPhi, rest;
-    auto append = [](std::vector<Instruction*>& to, const std::vector<Instruction*>& from) {
+    phiPart_.clear(), postPhi_.clear(), rest_.clear();
+    auto append = [](std::vector<Instruction*>& to, const Insts& from) {
       to.insert(to.end(), from.begin(), from.end());
     };
     for (Instruction* i : b->insts) {
@@ -253,18 +260,18 @@ class Scalarizer {
       if (id(i) != ~0u && removed_[id(i)] && !lanes) continue;
       if (lanes) {
         const Info& in = *find(i);
-        append(phi ? phiPart : rest, in.body);
-        append(phi ? postPhi : rest, in.tail);
+        append(phi ? phiPart_ : rest_, in.body);
+        append(phi ? postPhi_ : rest_, in.tail);
       } else {
-        (phi ? phiPart : rest).push_back(i);
-        if (const Info* in = find(i)) append(phi ? postPhi : rest, in->extras);
+        (phi ? phiPart_ : rest_).push_back(i);
+        if (const Info* in = find(i)) append(phi ? postPhi_ : rest_, in->extras);
       }
     }
     std::vector<Instruction*>& list = b->insts;
-    list = std::move(phiPart);
-    list.insert(list.end(), postPhi.begin(), postPhi.end());
+    list.assign(phiPart_.begin(), phiPart_.end());
+    list.insert(list.end(), postPhi_.begin(), postPhi_.end());
     if (b == f_->blocks[0]) list.insert(list.end(), argExtras_.begin(), argExtras_.end());
-    list.insert(list.end(), rest.begin(), rest.end());
+    list.insert(list.end(), rest_.begin(), rest_.end());
     for (Instruction* i : list)
       for (Value*& v : i->ops)
         if (unsigned k = id(v); k != ~0u && repl_[k]) v = repl_[k];
