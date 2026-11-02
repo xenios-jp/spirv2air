@@ -115,15 +115,45 @@ class Simplifier {
   }
 
  private:
-  using Preds = std::unordered_map<const BasicBlock*, std::vector<BasicBlock*>>;
+  // The predecessors of every block, one entry per edge, in block order: one array, indexed through the blocks'
+  // tags. A block added since has none.
+  class Preds {
+   public:
+    struct Range {
+      BasicBlock* const* first;
+      BasicBlock* const* last;
+      BasicBlock* const* begin() const { return first; }
+      BasicBlock* const* end() const { return last; }
+      size_t size() const { return size_t(last - first); }
+      bool empty() const { return first == last; }
+    };
 
-  // One entry per edge, in block order.
-  Preds predecessors() const {
-    Preds preds;
-    for (BasicBlock* b : f_->blocks)
-      for (const BasicBlock* s : successors(b)) preds[s].push_back(b);
-    return preds;
-  }
+    // start_[k] is block k's first entry in list_; start_[n_ + 1] == start_[n_] gives an empty range to the rest.
+    Preds(Module& m, const Function* f) : n_(uint32_t(f->blocks.size())), base_(m.allocTags(n_)), start_(n_ + 2) {
+      for (uint32_t k = 0; k < n_; ++k) f->blocks[k]->tag = base_ + k;
+      for (const BasicBlock* b : f->blocks)
+        for (const BasicBlock* s : successors(b))
+          if (s->tag - base_ < n_) ++start_[s->tag - base_ + 1];
+      for (uint32_t k = 0; k <= n_; ++k) start_[k + 1] += start_[k];
+      list_.resize(start_[n_]);
+      std::vector<uint32_t> next(start_.begin(), start_.begin() + n_);
+      for (BasicBlock* b : f->blocks)
+        for (const BasicBlock* s : successors(b))
+          if (s->tag - base_ < n_) list_[next[s->tag - base_]++] = b;
+    }
+
+    Range operator[](const BasicBlock* b) const {
+      uint32_t k = b->tag - base_ < n_ ? b->tag - base_ : n_;
+      return {list_.data() + start_[k], list_.data() + start_[k + 1]};
+    }
+
+   private:
+    uint32_t n_, base_;
+    std::vector<uint32_t> start_;
+    std::vector<BasicBlock*> list_;
+  };
+
+  Preds predecessors() const { return Preds(m_, f_); }
 
   static size_t edgesTo(const BasicBlock* from, const BasicBlock* to) {
     size_t n = 0;
@@ -273,7 +303,7 @@ class Simplifier {
       if (t->op != Op::Br || t->bbs.size() != 1) continue;
       BasicBlock* m = t->bbs[0];
       if (m == e || touched.count(m)) continue;
-      const std::vector<BasicBlock*>& ps = preds[e];
+      const Preds::Range ps = preds[e];
       bool ok = !ps.empty();
       for (const BasicBlock* p : ps)
         ok &= p != e && p != m && !touched.count(p) && edgesTo(p, e) == 1 && edgesTo(p, m) == 0;
@@ -314,8 +344,7 @@ class Simplifier {
   // all run in h. Returns the join, or null.
   BasicBlock* arm(const Preds& preds, const BasicBlock* h, const BasicBlock* a) const {
     if (a == h || edgesTo(h, a) != 1) return nullptr;
-    auto p = preds.find(a);
-    if (p == preds.end() || p->second.size() != 1) return nullptr;
+    if (preds[a].size() != 1) return nullptr;
     const Instruction* t = a->insts.back();
     if (t->op != Op::Br || t->bbs.size() != 1 || t->bbs[0] == a || t->bbs[0] == h) return nullptr;
     for (size_t k = 0; k + 1 < a->insts.size(); ++k)
