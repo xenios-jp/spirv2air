@@ -55,15 +55,29 @@ bool hasFunctionAttr(const AttrList* l, const Attr& a) {
 
 // A call is pure when its callee is declared readnone (the AttrClass::Pure intrinsics): same arguments, same result,
 // no memory read or written, no other effect. readonly texture and bit-field calls are left alone on purpose.
-bool pureCall(const Instruction* i) {
-  static const Attr readnone = Attr::get("readnone");
-  if (i->ops.empty() || i->ops[0]->vk != Value::Func) return false;
-  return hasFunctionAttr(static_cast<const Function*>(i->ops[0])->attrs, readnone) ||
-         hasFunctionAttr(i->attrs, readnone);
-}
+// Attribute lists are interned (equal lists are one pointer), so the answer is kept per list: a function makes many
+// calls through a handful of lists.
+class PureCalls {
+ public:
+  bool operator()(const Instruction* i) {
+    if (i->ops.empty() || i->ops[0]->vk != Value::Func) return false;
+    return readnone(static_cast<const Function*>(i->ops[0])->attrs) || readnone(i->attrs);
+  }
+
+ private:
+  bool readnone(const AttrList* l) {
+    if (!l) return false;
+    for (const auto& [list, has] : known_)
+      if (list == l) return has;
+    static const Attr readnone = Attr::get("readnone");
+    known_.push_back({l, hasFunctionAttr(l, readnone)});
+    return known_.back().second;
+  }
+  std::vector<std::pair<const AttrList*, bool>> known_;
+};
 
 // Instructions that may be deleted when nothing uses their result.
-bool removable(const Instruction* i) {
+bool removable(const Instruction* i, PureCalls& pureCall) {
   switch (i->op) {
     case Op::BinOp:
     case Op::Cast:
@@ -382,7 +396,7 @@ class Cleaner {
     };
     for (const BasicBlock* b : f_->blocks)
       for (const Instruction* i : b->insts)
-        if (!removable(i)) mark(i);
+        if (!removable(i, pureCalls_)) mark(i);
     while (!work.empty()) {
       const Instruction* i = work.back();
       work.pop_back();
@@ -391,7 +405,7 @@ class Cleaner {
     bool changed = false;
     for (BasicBlock* b : f_->blocks) {
       auto dead = [&](Instruction* i) {
-        if (!removable(i) || live[id(i)]) return false;
+        if (!removable(i, pureCalls_) || live[id(i)]) return false;
         ++(i->op == Op::Phi ? stats_.deadPhis : stats_.deadInsts);
         return true;
       };
@@ -405,6 +419,7 @@ class Cleaner {
   Module& m_;
   Function* f_;
   CleanupStats stats_;
+  PureCalls pureCalls_;
   unsigned long changes_ = 0;
   unsigned long clean_[6] = {~0ul, ~0ul, ~0ul, ~0ul, ~0ul, ~0ul};
   uint32_t ibase_ = 0;
