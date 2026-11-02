@@ -260,6 +260,7 @@ class Translator {
   std::map<uint32_t, uint32_t> varInit_;  // module-scope OpVariable -> its initializer
   std::vector<bool> stored_;       // per variable: written by some OpStore (directly or through a chain)
   std::vector<BasicBlock*> blocks_;  // by label id
+  std::vector<bool> labels_;         // per id: defined by an OpLabel
   std::vector<std::pair<Instruction*, Inst>> phis_;
   std::map<std::string, Function*> decls_;
   std::map<uint32_t, std::pair<Value*, Value*>> sampledImages_;  // id -> (texture, sampler)
@@ -390,6 +391,7 @@ void Translator::decode() {
   vals_.resize(bound);
   ptrs_.resize(bound);
   stored_.resize(bound);
+  labels_.resize(bound);
   varType_.resize(bound, kNone);
   for (size_t pos = 5; pos < count_;) {
     uint16_t wc = uint16_t(words_[pos] >> 16), op = uint16_t(words_[pos] & 0xFFFF);
@@ -554,6 +556,9 @@ void Translator::decode() {
         functionBegin_ = i;
         break;
       case spv::OpFunctionEnd: functionEnd_ = i; break;
+      case spv::OpLabel:
+        if (in.operand(0) < bound) labels_[in.operand(0)] = true;
+        break;
       case spv::OpAccessChain:
       case spv::OpInBoundsAccessChain: {
         uint32_t base = in.operand(2);
@@ -1334,6 +1339,8 @@ Value* Translator::val(uint32_t id) const {
 
 BasicBlock* Translator::block(uint32_t label) {
   if (label >= vals_.size()) fail("label %" + std::to_string(label) + " out of range");
+  // A block made for an id no OpLabel defines would stay empty, without the terminator every pass relies on.
+  if (!labels_[label]) fail("label %" + std::to_string(label) + " is not defined in the function");
   if (blocks_.empty()) blocks_.resize(vals_.size());
   BasicBlock*& bb = blocks_[label];
   if (!bb) bb = m_.addBlock(main_);
@@ -1365,8 +1372,13 @@ void Translator::translateFunction() {
     }
   }
   entryB_->br(block(firstLabel_));
+  // glslang writes only the blocks reachable from the entry (and dead merge and continue targets) but keeps the phi
+  // entries that name the blocks it left out; xenia's guest shaders have them (spirv-val rejects such a module). No
+  // edge comes from a block that does not exist, so the entry is dropped before its value, which may have been
+  // defined only in that block, is read.
   for (auto& [phi, in] : phis_) {
     for (unsigned w = 3; w + 1 < in.wc; w += 2) {
+      if (in.w[w + 1] < labels_.size() && !labels_[in.w[w + 1]]) continue;
       phi->ops.push_back(val(in.w[w]));
       phi->bbs.push_back(block(in.w[w + 1]));
     }

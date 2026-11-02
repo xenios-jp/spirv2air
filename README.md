@@ -72,7 +72,7 @@ if (!result.ok()) {
 }
 ```
 
-- **Input must already be validated** (for example with `spirv-val`). spirv2air is not a defensive validator for untrusted SPIR-V.
+- **Input must already be validated** (for example with `spirv-val`). spirv2air is not a defensive validator for untrusted SPIR-V. One exception is accepted: `OpPhi` entries whose parent is not a block of the function, which glslang leaves when it omits unreachable blocks, are dropped, since no edge comes from such a block.
 - **Cache keys** must include the input module, every option, and `spirv2air::kVersion`.
 - **Graphics shaders** use the layout in [the binding contract](docs/bindings.md): resource and sampler heaps, a top-level argument buffer, texture index records, and the xenia-derived defaults (`vertexIndexRelativeToBase`, `positionInfToNan`) that can be turned off.
 
