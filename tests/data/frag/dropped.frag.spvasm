@@ -1,0 +1,41 @@
+; Test shader for tests/dropped_cpu.cpp: phis that keep entries for a block the module does not contain, as glslang
+; leaves them when it omits an unreachable block (xenia's guest shaders have them; spirv-val rejects the module). %gone
+; is no block of the function and %lost, the value %w would take from it, is defined nowhere. The real edges come from
+; %left and %right: color = x < 2 ? (1, x, 0, 1) : (2, 0, 0, 1).
+               OpCapability Shader
+               OpMemoryModel Logical GLSL450
+               OpEntryPoint Fragment %main "main" %coord %color
+               OpExecutionMode %main OriginUpperLeft
+               OpDecorate %coord BuiltIn FragCoord
+               OpDecorate %color Location 0
+       %void = OpTypeVoid
+       %fnty = OpTypeFunction %void
+       %bool = OpTypeBool
+      %float = OpTypeFloat 32
+     %float4 = OpTypeVector %float 4
+    %p_in_f4 = OpTypePointer Input %float4
+   %p_out_f4 = OpTypePointer Output %float4
+         %f0 = OpConstant %float 0
+         %f1 = OpConstant %float 1
+         %f2 = OpConstant %float 2
+         %f3 = OpConstant %float 3
+      %coord = OpVariable %p_in_f4 Input
+      %color = OpVariable %p_out_f4 Output
+       %main = OpFunction %void None %fnty
+      %entry = OpLabel
+          %c = OpLoad %float4 %coord
+          %x = OpCompositeExtract %float %c 0
+          %b = OpFOrdLessThan %bool %x %f2
+               OpSelectionMerge %join None
+               OpBranchConditional %b %left %right
+       %left = OpLabel
+               OpBranch %join
+      %right = OpLabel
+               OpBranch %join
+       %join = OpLabel
+          %v = OpPhi %float %f1 %left %f3 %gone %f2 %right
+          %w = OpPhi %float %x %left %f0 %right %lost %gone
+          %o = OpCompositeConstruct %float4 %v %w %f0 %f1
+               OpStore %color %o
+               OpReturn
+               OpFunctionEnd
