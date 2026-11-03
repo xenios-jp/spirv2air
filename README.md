@@ -102,7 +102,7 @@ A module has one entry point and one function with no parameters. Supported exec
 - `TessellationEvaluation`, for triangle and quad domains, emitted as a Metal post-tessellation vertex function;
 - `GLCompute`, with a literal `LocalSize`.
 
-Supported capabilities: `Shader`, `DenormFlushToZero`, `DerivativeControl`, `DemoteToHelperInvocation`, `ImageQuery`, `Tessellation`, `SampleRateShading`, `InterpolationFunction`, `ClipDistance`, `CullDistance` and `FloatControls2` (strict `FPFastMathMode None` only; other masks and `FPFastMathDefault` are rejected). A supported capability does not mean every operation it allows is implemented.
+Supported capabilities: `Shader`, `DenormFlushToZero`, `DerivativeControl`, `DemoteToHelperInvocation`, `ImageQuery`, `Tessellation`, `SampleRateShading`, `InterpolationFunction`, `GroupNonUniform`, `GroupNonUniformVote`, `ClipDistance`, `CullDistance` and `FloatControls2` (strict `FPFastMathMode None` only; other masks and `FPFastMathDefault` are rejected). A supported capability does not mean every operation it allows is implemented.
 
 **Types:** booleans, 32-bit integers and floats, vectors, arrays and structs. Buffers need explicit member offsets and array strides.
 
@@ -119,6 +119,7 @@ Supported capabilities: `Shader`, `DenormFlushToZero`, `DerivativeControl`, `Dem
 - center-sampled `BaryCoordNoPerspKHR` fragment inputs (float3 linear primitive barycentrics); perspective and non-center barycentric inputs are rejected;
 - centroid, sample, perspective and no-perspective interpolation; `InterpolateAtCentroid`, `InterpolateAtSample` and `InterpolateAtOffset` (pull-model interpolation, [air.md](docs/air.md#pull-model-interpolation));
 - discard and demote-to-helper; derivatives;
+- `OpGroupNonUniformAny` at Subgroup scope, as MSL's `simd_any` (checked in pixel shaders);
 - bindless float texture sampling of 2D, 2D-array, 3D, cube and cube-array textures, with `Bias`, `Lod` and `Grad` operands;
 - up to eight combined clip and cull distances. Cull distances are approximated with a steep clip distance; see the comment in `translate.cpp`;
 - storage buffers at configured argument-buffer offsets, supporting loads and 32-bit integer atomics;
@@ -159,7 +160,7 @@ Anything outside the subset above is rejected with a diagnostic. Some unrelated 
 | Images | Storage images and image writes; graphics `OpImageFetch`; sampling from compute shaders | Not implemented yet |
 | Sampling | Depth-compare, gather, projective and sparse sampling; `MinLod` and `ConstOffset` operands | Not implemented yet |
 | Atomics and memory | Non-relaxed memory order; standalone memory barriers | Need a Metal 3.2 (newer OS) target |
-| Subgroups | Subgroup arithmetic and ballot instructions | Not implemented yet |
+| Subgroups | Subgroup arithmetic and ballot instructions; votes other than `OpGroupNonUniformAny` | Not implemented yet |
 
 ## Libraries and documentation
 

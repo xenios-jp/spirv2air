@@ -26,6 +26,7 @@ This is an audit of common operations, not a claim that every SPIR-V capability 
 | Atomic RMW | Add/sub, and/or/xor, signed/unsigned min/max, exchange | 32-bit operations; unsupported ordering/scope is rejected |
 | Additional atomics | Load/store, integer increment/decrement, strong compare/exchange | Supported on device buffers and compute Workgroup memory; relaxed ordering |
 | Control barriers | Workgroup/subgroup execution, uniform/workgroup/cross-workgroup/image memory flags | Supported in compute, including combined flags |
+| Subgroup vote | `OpGroupNonUniformAny` at Subgroup scope | Supported as `air.simd_any`; checked in a pixel shader against MSL (`tests/centroid_gpu.mm`). `OpGroupNonUniformAll`, `AllEqual` and the other group operations are not implemented |
 | Memory barriers | `OpMemoryBarrier`, non-relaxed atomic ordering | Explicitly rejected: standalone fences need a newer target |
 | Other image/storage operations | Storage image read/write, sparse images, query format/order, other dimensions | Outside the image profile; rejected |
 | Other atomic widths/forms | 64-bit/float/flag atomics, Kernel-only weak compare/exchange | Outside the Shader/32-bit capability profile; rejected |
@@ -68,7 +69,7 @@ fraction handling preserve subnormals exactly. Pow comparisons cover its defined
 
 Execution models are Vertex, Fragment, TessellationEvaluation (triangle/quad post-tessellation vertex functions), and GLCompute. There is one entry point and one parameterless SPIR-V function. Internal helper functions may be emitted for strong compare/exchange. Shader scalar data are booleans and 32-bit integer/float values, with vectors, arrays, runtime buffer arrays and structs; general matrices and SPIR-V 8/16/64-bit numeric data remain unsupported. Compute resources use explicit Options bindings; graphics resources use the argument-buffer layout in docs/bindings.md.
 
-Accepted capabilities are Shader, DenormFlushToZero, DerivativeControl, DemoteToHelperInvocation, ImageQuery, Tessellation, SampleRateShading, InterpolationFunction, ClipDistance and CullDistance, and FragmentShaderPixelInterlockEXT with a raster-ordered buffer configured ([bindings.md](bindings.md)). Acceptance of a capability does not implement every associated operation. Extended instructions are GLSL.std.450 only. The integer/logical-copy fixture uses SPIR-V 1.5; the remaining new fixtures use 1.3.
+Accepted capabilities are Shader, DenormFlushToZero, DerivativeControl, DemoteToHelperInvocation, ImageQuery, Tessellation, SampleRateShading, InterpolationFunction, GroupNonUniform, GroupNonUniformVote, ClipDistance and CullDistance, and FragmentShaderPixelInterlockEXT with a raster-ordered buffer configured ([bindings.md](bindings.md)). Acceptance of a capability does not implement every associated operation. Extended instructions are GLSL.std.450 only. The integer/logical-copy fixture uses SPIR-V 1.5; the remaining new fixtures use 1.3.
 
 ## Complete implemented instruction inventory
 

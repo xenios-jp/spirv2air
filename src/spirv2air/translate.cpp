@@ -428,7 +428,8 @@ void Translator::decode() {
             c != spv::CapabilitySampleRateShading && c != spv::CapabilityClipDistance &&
             c != spv::CapabilityCullDistance && c != spv::CapabilityFloatControls2 &&
             c != spv::CapabilityFragmentBarycentricKHR && c != spv::CapabilityFragmentShaderPixelInterlockEXT &&
-            c != spv::CapabilityInterpolationFunction)
+            c != spv::CapabilityInterpolationFunction && c != spv::CapabilityGroupNonUniform &&
+            c != spv::CapabilityGroupNonUniformVote)
           fail("capability " + std::to_string(c));
         if (c == spv::CapabilityFragmentShaderPixelInterlockEXT && options_.graphics.rasterOrderedBuffer < 0)
           fail("pixel interlock requires graphics.rasterOrderedBuffer");
@@ -2088,6 +2089,11 @@ void Translator::translate(const Inst& in) {
       }));
       break;
     }
+    case spv::OpGroupNonUniformAny:  // a vote over the SIMD-group, as MSL's simd_any
+      if (constU32(in.operand(2)) != spv::ScopeSubgroup) fail("group operation scope");
+      if (op(3)->type != i1_) fail("group vote predicate");
+      set(intrinsic("air.simd_any", i1_, {op(3)}, AttrClass::Derivative));
+      break;
 
     // ---- extended, images, atomics
     case spv::OpExtInst:
