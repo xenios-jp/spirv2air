@@ -1,0 +1,76 @@
+; Pull-model interpolation for tests/interpolate_gpu.mm: GLSL.std.450 InterpolateAtOffset, InterpolateAtSample and
+; InterpolateAtCentroid on whole inputs and, through an access chain, on one component. %a is a perspective input
+; with Centroid sampling (Xenia's centroid interpolators), %b a center-sampled NoPerspective one. The uniform block at
+; set 1 binding 0 holds the offset (float2) and the sample index (int).
+;   rt0 = InterpolateAtOffset(a, offset)
+;   rt1 = InterpolateAtSample(b, sample)
+;   rt2 = InterpolateAtCentroid(b)
+;   rt3 = (InterpolateAtOffset(a.x, offset), InterpolateAtSample(b.y, sample), a.z, b.w): the plain loads read a at
+;         its centroid and b at the pixel center.
+               OpCapability Shader
+               OpCapability InterpolationFunction
+       %glsl = OpExtInstImport "GLSL.std.450"
+               OpMemoryModel Logical GLSL450
+               OpEntryPoint Fragment %main "main" %a %b %rt0 %rt1 %rt2 %rt3
+               OpExecutionMode %main OriginUpperLeft
+               OpDecorate %a Location 0
+               OpDecorate %a Centroid
+               OpDecorate %b Location 1
+               OpDecorate %b NoPerspective
+               OpDecorate %rt0 Location 0
+               OpDecorate %rt1 Location 1
+               OpDecorate %rt2 Location 2
+               OpDecorate %rt3 Location 3
+               OpMemberDecorate %Block 0 Offset 0
+               OpMemberDecorate %Block 1 Offset 8
+               OpDecorate %Block Block
+               OpDecorate %ubo DescriptorSet 1
+               OpDecorate %ubo Binding 0
+       %void = OpTypeVoid
+       %fnty = OpTypeFunction %void
+      %float = OpTypeFloat 32
+        %int = OpTypeInt 32 1
+         %v2 = OpTypeVector %float 2
+         %v4 = OpTypeVector %float 4
+       %int0 = OpConstant %int 0
+       %int1 = OpConstant %int 1
+       %int2 = OpConstant %int 2
+       %int3 = OpConstant %int 3
+      %Block = OpTypeStruct %v2 %int
+   %p_un_blk = OpTypePointer Uniform %Block
+    %p_un_v2 = OpTypePointer Uniform %v2
+   %p_un_int = OpTypePointer Uniform %int
+    %p_in_v4 = OpTypePointer Input %v4
+     %p_in_f = OpTypePointer Input %float
+   %p_out_v4 = OpTypePointer Output %v4
+        %ubo = OpVariable %p_un_blk Uniform
+          %a = OpVariable %p_in_v4 Input
+          %b = OpVariable %p_in_v4 Input
+        %rt0 = OpVariable %p_out_v4 Output
+        %rt1 = OpVariable %p_out_v4 Output
+        %rt2 = OpVariable %p_out_v4 Output
+        %rt3 = OpVariable %p_out_v4 Output
+       %main = OpFunction %void None %fnty
+      %entry = OpLabel
+         %op = OpAccessChain %p_un_v2 %ubo %int0
+     %offset = OpLoad %v2 %op
+         %sp = OpAccessChain %p_un_int %ubo %int1
+     %sample = OpLoad %int %sp
+         %o0 = OpExtInst %v4 %glsl InterpolateAtOffset %a %offset
+               OpStore %rt0 %o0
+         %o1 = OpExtInst %v4 %glsl InterpolateAtSample %b %sample
+               OpStore %rt1 %o1
+         %o2 = OpExtInst %v4 %glsl InterpolateAtCentroid %b
+               OpStore %rt2 %o2
+         %ax = OpAccessChain %p_in_f %a %int0
+         %x3 = OpExtInst %float %glsl InterpolateAtOffset %ax %offset
+         %by = OpAccessChain %p_in_f %b %int1
+         %y3 = OpExtInst %float %glsl InterpolateAtSample %by %sample
+         %az = OpAccessChain %p_in_f %a %int2
+         %z3 = OpLoad %float %az
+         %bw = OpAccessChain %p_in_f %b %int3
+         %w3 = OpLoad %float %bw
+         %o3 = OpCompositeConstruct %v4 %x3 %y3 %z3 %w3
+               OpStore %rt3 %o3
+               OpReturn
+               OpFunctionEnd

@@ -217,6 +217,8 @@ class Translator {
   Value* extInst(const Inst& in);
   Value* findMsb(Value* x, bool sign);
   Value* geometric(const Inst& in);
+  Value* interpolate(Builder& b, uint32_t var, const char* at, Value* extra);
+  Value* interpolateAt(const Inst& in);
   Value* splitFloat(const Inst& in, bool frexp);
   Value* packNormalized(const char* name, Value* x);
   Value* sample(const Inst& in);
@@ -302,6 +304,10 @@ class Translator {
   int argVertexId_ = -1, argBaseVertex_ = -1, argTlab_ = -1, argResHeap_ = -1, argSmpHeap_ = -1, argPatchId_ = -1,
       argControlPoints_ = -1;
   std::map<uint32_t, int> argOfInput_;  // Input variable -> argument
+  // Input variables read by InterpolateAt*, which become pull-model interpolant arguments -> whether an OpLoad
+  // also reads them.
+  std::map<uint32_t, bool> pulled_;
+  Type* interpolantTy_ = nullptr;
   bool usesTextures_ = false, usesSamplers_ = false;
 
   Function* main_ = nullptr;
@@ -421,7 +427,8 @@ void Translator::decode() {
             c != spv::CapabilityImageQuery && c != spv::CapabilityTessellation &&
             c != spv::CapabilitySampleRateShading && c != spv::CapabilityClipDistance &&
             c != spv::CapabilityCullDistance && c != spv::CapabilityFloatControls2 &&
-            c != spv::CapabilityFragmentBarycentricKHR && c != spv::CapabilityFragmentShaderPixelInterlockEXT)
+            c != spv::CapabilityFragmentBarycentricKHR && c != spv::CapabilityFragmentShaderPixelInterlockEXT &&
+            c != spv::CapabilityInterpolationFunction)
           fail("capability " + std::to_string(c));
         if (c == spv::CapabilityFragmentShaderPixelInterlockEXT && options_.graphics.rasterOrderedBuffer < 0)
           fail("pixel interlock requires graphics.rasterOrderedBuffer");
@@ -574,11 +581,24 @@ void Translator::decode() {
         if (in.wc > 6 && (in.w[4] == GLSLstd450Modf || in.w[4] == GLSLstd450Frexp)) {
           uint32_t p = in.w[6];
           stored_[root[p] != kNone ? root[p] : p] = true;
+        } else if (in.wc > 5 && in.w[4] >= GLSLstd450InterpolateAtCentroid &&
+                   in.w[4] <= GLSLstd450InterpolateAtOffset) {
+          uint32_t p = in.w[5];
+          if (p < bound) pulled_.emplace(root[p] != kNone ? root[p] : p, false);
         }
         break;
       default: break;
     }
   }
+  // A pulled input reads its declared interpolation only where something loads it (or may, through a copy).
+  if (!pulled_.empty())
+    for (const Inst& in : insts_) {
+      uint32_t p = in.op == spv::OpLoad || in.op == spv::OpCopyObject || in.op == spv::OpCopyLogical ? in.operand(2)
+                   : in.op == spv::OpCopyMemory                                                      ? in.operand(1)
+                                                                                                     : kNone;
+      if (p == kNone || p >= bound) continue;
+      if (auto it = pulled_.find(root[p] != kNone ? root[p] : p); it != pulled_.end()) it->second = true;
+    }
   if (entryId_ == kNone || !functionBegin_ || !functionEnd_) fail("no entry point");
   if (model_ != spv::ExecutionModelVertex && model_ != spv::ExecutionModelFragment &&
       model_ != spv::ExecutionModelTessellationEvaluation && model_ != spv::ExecutionModelGLCompute)
@@ -795,6 +815,15 @@ void Translator::buildSignature() {
                               I(4), S("air.arg_type_name"), S("float"), S("air.arg_name"), S("control_points")}));
     }
   }
+  // InterpolateAt* reads a location input. A flat one has the same value everywhere and stays a plain input.
+  for (auto it = pulled_.begin(); it != pulled_.end();) {
+    const Decorations& d = decor_[it->first];
+    if (vertex || varType_[it->first] == kNone || type(varType_[it->first]).storage != spv::StorageClassInput ||
+        d.builtin != kNone || d.location == kNone)
+      fail("InterpolateAt* operand is not a fragment input");
+    if (d.sample) fail("InterpolateAt* operand with Sample interpolation");
+    it = d.flat ? pulled_.erase(it) : std::next(it);
+  }
   for (auto& [location, var] : inputs) {
     const Decorations& d = decor_[var];
     Type* t = llvmType(type(varType_[var]).elem);
@@ -802,6 +831,17 @@ void Translator::buildSignature() {
     // Vulkan requires integer inputs to be Flat.
     if (isIntVector(t) && !d.flat) fail("integer fragment input without Flat at location " + std::to_string(location));
     std::string name = "texcoord" + std::to_string(location);
+    if (pulled_.count(var)) {
+      // A pull-model interpolant, as MSL's interpolant<T, interpolation::...>. Plain loads read it at the center or
+      // the centroid (inputValue).
+      if (!interpolantTy_) interpolantTy_ = m_.structTy("struct._interpolant_t");
+      argOfInput_[var] =
+          int(addArg(m_.ptrTy(interpolantTy_, 1),
+                     {S("air.fragment_input"), S("user(" + name + ")"), S("air.interpolation_function"),
+                      S(d.noperspective ? "air.no_perspective" : "air.perspective"), S("air.arg_type_name"),
+                      S(varyingTypeName(type(varType_[var]).elem)), S("air.arg_name"), S(name)}));
+      continue;
+    }
     // Flat is the single air.flat qualifier in place of the sampling and perspective pair.
     std::vector<Metadata*> md = {S("air.fragment_input"), S("user(" + name + ")")};
     if (d.flat) {
@@ -1175,6 +1215,8 @@ Value* Translator::inputValue(uint32_t var, Type* t) {
     }
     return v;
   }
+  if (auto it = pulled_.find(var); it != pulled_.end())
+    return it->second ? interpolate(b, var, decor_[var].centroid ? "centroid" : "center", nullptr) : m_.constUndef(t);
   int arg = argOfInput_.at(var);
   if (arg < 0) {
     if (options_.vertexIndexRelativeToBase) return b.binop(Sub, main_->args[argVertexId_], main_->args[argBaseVertex_]);
@@ -2420,8 +2462,58 @@ Value* Translator::extInst(const Inst& in) {
     case GLSLstd450Reflect:
     case GLSLstd450Refract:
       return geometric(in);
+    case GLSLstd450InterpolateAtCentroid:
+    case GLSLstd450InterpolateAtSample:
+    case GLSLstd450InterpolateAtOffset:
+      return interpolateAt(in);
     default: fail("GLSL.std.450 instruction " + std::to_string(in.w[4]));
   }
+}
+
+// Pull-model interpolation of a pulled input, as MSL's interpolant<T, interpolation::...>::interpolate_at_*: `at` is
+// center, centroid, sample (extra: the sample index) or offset (extra: the float2 offset from the pixel center).
+Value* Translator::interpolate(Builder& b, uint32_t var, const char* at, Value* extra) {
+  Type* t = llvmType(type(varType_[var]).elem);
+  std::string name = std::string("air.interpolate_") + at +
+                     (decor_[var].noperspective ? "_no_perspective." : "_perspective.") +
+                     (t->kind == Type::Vector ? "v" + std::to_string(t->n) : "") + "f32";
+  std::vector<Value*> args = {main_->args[argOfInput_.at(var)]};
+  if (extra) args.push_back(extra);
+  std::vector<Type*> params;
+  for (Value* v : args) params.push_back(v->type);
+  return b.call(declare(name, t, params, AttrClass::TextureRead), args);
+}
+
+// InterpolateAtCentroid/Sample/Offset of an input or, through an access chain, one of its components.
+Value* Translator::interpolateAt(const Inst& in) {
+  const Pointer& p = ptrs_[in.w[5]];
+  if (!pulled_.count(p.variable)) return load(p);  // flat: the same value everywhere in the primitive
+  Value* extra = nullptr;
+  if (in.w[4] != GLSLstd450InterpolateAtCentroid) {
+    if (in.wc < 7) fail("InterpolateAt* operands");
+    extra = val(in.w[6]);
+    if (extra->type != (in.w[4] == GLSLstd450InterpolateAtSample ? i32_ : m_.vecTy(f32_, 2)))
+      fail("InterpolateAt* operand type");
+    // SPIR-V's offset is from the pixel center, Metal's from its upper-left corner (tests/interpolate_gpu.mm).
+    if (in.w[4] == GLSLstd450InterpolateAtOffset)
+      extra = b_->binop(FAdd, extra, m_.constAggregate(extra->type, {m_.constFloat(0.5f), m_.constFloat(0.5f)}));
+  }
+  Value* v = interpolate(*b_, p.variable,
+                         in.w[4] == GLSLstd450InterpolateAtCentroid ? "centroid"
+                         : in.w[4] == GLSLstd450InterpolateAtSample ? "sample"
+                                                                    : "offset",
+                         extra);
+  if (p.ptr == ptrs_[p.variable].ptr) return v;
+  // A component: the chain's GEP is `0, index` into the vector.
+  const auto* gep = static_cast<const Instruction*>(p.ptr);
+  if (gep->op == Op::GEP && gep->ops.size() == 2) return v;
+  if (gep->op != Op::GEP || gep->ops.size() != 3 || v->type->kind != Type::Vector) fail("InterpolateAt* operand chain");
+  Value* index = gep->ops[2];
+  uint32_t c;
+  if (constU32(index, c)) return b_->extractElement(v, index);
+  // As OpVectorExtractDynamic: an out-of-range index reads zero.
+  Value* valid = b_->icmp(I_ULT, index, cint(v->type->n));
+  return b_->select(valid, b_->extractElement(v, b_->select(valid, index, cint(0))), m_.constNull(v->type->elem));
 }
 
 // Length, Distance, Cross, Normalize, FaceForward, Reflect and Refract as Apple's compiler expands the MSL functions:

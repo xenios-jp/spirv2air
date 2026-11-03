@@ -102,7 +102,7 @@ A module has one entry point and one function with no parameters. Supported exec
 - `TessellationEvaluation`, for triangle and quad domains, emitted as a Metal post-tessellation vertex function;
 - `GLCompute`, with a literal `LocalSize`.
 
-Supported capabilities: `Shader`, `DenormFlushToZero`, `DerivativeControl`, `DemoteToHelperInvocation`, `ImageQuery`, `Tessellation`, `SampleRateShading`, `ClipDistance`, `CullDistance` and `FloatControls2` (strict `FPFastMathMode None` only; other masks and `FPFastMathDefault` are rejected). A supported capability does not mean every operation it allows is implemented.
+Supported capabilities: `Shader`, `DenormFlushToZero`, `DerivativeControl`, `DemoteToHelperInvocation`, `ImageQuery`, `Tessellation`, `SampleRateShading`, `InterpolationFunction`, `ClipDistance`, `CullDistance` and `FloatControls2` (strict `FPFastMathMode None` only; other masks and `FPFastMathDefault` are rejected). A supported capability does not mean every operation it allows is implemented.
 
 **Types:** booleans, 32-bit integers and floats, vectors, arrays and structs. Buffers need explicit member offsets and array strides.
 
@@ -117,7 +117,7 @@ Supported capabilities: `Shader`, `DenormFlushToZero`, `DerivativeControl`, `Dem
 - float, 32-bit int and uint scalar and vector varyings by location (integer fragment inputs must be `Flat`, as Vulkan requires), `Flat` float varyings (flat values come from the first vertex of a triangle, as in Vulkan's default);
 - depth and sample-mask outputs; sample ID and sample-mask inputs;
 - center-sampled `BaryCoordNoPerspKHR` fragment inputs (float3 linear primitive barycentrics); perspective and non-center barycentric inputs are rejected;
-- centroid, sample, perspective and no-perspective interpolation;
+- centroid, sample, perspective and no-perspective interpolation; `InterpolateAtCentroid`, `InterpolateAtSample` and `InterpolateAtOffset` (pull-model interpolation, [air.md](docs/air.md#pull-model-interpolation));
 - discard and demote-to-helper; derivatives;
 - bindless float texture sampling of 2D, 2D-array, 3D, cube and cube-array textures, with `Bias`, `Lod` and `Grad` operands;
 - up to eight combined clip and cull distances. Cull distances are approximated with a steep clip distance; see the comment in `translate.cpp`;

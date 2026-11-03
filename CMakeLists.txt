@@ -105,6 +105,7 @@ if(BUILD_TESTING AND SPIRV2AIR_BUILD_TESTS)
   assemble(flat_frag frag/flat.frag.spvasm vulkan1.1)
   assemble(narrow frag/narrow.frag.spvasm vulkan1.1)
   assemble(barycentric frag/barycentric.frag.spvasm vulkan1.1)
+  assemble(interpolate frag/interpolate.frag.spvasm vulkan1.1)
   assemble(ordered frag/ordered.frag.spvasm vulkan1.1)
   assemble(dropped frag/dropped.frag.spvasm vulkan1.1)
   assemble(intnoflat frag/intnoflat.frag.spvasm vulkan1.1)
@@ -127,7 +128,7 @@ if(BUILD_TESTING AND SPIRV2AIR_BUILD_TESTS)
                ${layer2da_SPV} ${tex2d_SPV} ${cube_SPV} ${cubearray_SPV} ${tex3d_SPV} ${layer2dagrad_SPV} ${cubegrad_SPV} ${tex3dgrad_SPV} ${mathieee_SPV} ${lodbias_SPV}
                ${flat_vert_SPV} ${flat_frag_SPV} ${narrow_SPV} ${strict_math_SPV} ${strict_fma_SPV})
   add_custom_target(test_data ALL DEPENDS ${TEST_SPV} ${intnoflat_SPV} ${ieee_SPV} ${pack_SPV} ${strictmul_SPV} ${strictmul_none_SPV} ${integer_SPV} ${float_math_SPV} ${packing_SPV}
-                                   ${glslext_comp_SPV} ${glslext_frag_SPV} ${atomic_extra_SPV} ${fetchstate_SPV} ${tilecull_SPV} ${barycentric_SPV} ${ordered_SPV}
+                                   ${glslext_comp_SPV} ${glslext_frag_SPV} ${atomic_extra_SPV} ${fetchstate_SPV} ${tilecull_SPV} ${barycentric_SPV} ${ordered_SPV} ${interpolate_SPV}
                                    ${tables_SPV} ${dropped_SPV})
   add_executable(cpu_tests tests/cpu_tests.cpp)
   target_link_libraries(cpu_tests PRIVATE spirv2air airkit)
@@ -139,6 +140,11 @@ if(BUILD_TESTING AND SPIRV2AIR_BUILD_TESTS)
   add_dependencies(barycentric_cpu test_data)
   add_test(NAME barycentric_cpu COMMAND barycentric_cpu ${barycentric_SPV})
   set_tests_properties(barycentric_cpu PROPERTIES LABELS CPU)
+  add_executable(interpolate_cpu tests/interpolate_cpu.cpp)
+  target_link_libraries(interpolate_cpu PRIVATE spirv2air)
+  add_dependencies(interpolate_cpu test_data)
+  add_test(NAME interpolate_cpu COMMAND interpolate_cpu ${interpolate_SPV})
+  set_tests_properties(interpolate_cpu PROPERTIES LABELS CPU)
   add_executable(ordered_cpu tests/ordered_cpu.cpp)
   target_link_libraries(ordered_cpu PRIVATE spirv2air airkit)
   add_dependencies(ordered_cpu test_data)
@@ -195,6 +201,14 @@ if(BUILD_TESTING AND SPIRV2AIR_BUILD_TESTS)
         -DOUTPUT_DIR=${CMAKE_CURRENT_BINARY_DIR}/apple-tools-fc
         -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/apple_validate.cmake)
       set_tests_properties(apple_tools_fc PROPERTIES LABELS CPU)
+      # Pull-model interpolation: the interpolant arguments and calls as Apple's compiler writes them for MSL.
+      add_test(NAME apple_tools_interpolate COMMAND ${CMAKE_COMMAND}
+        -DCLI=$<TARGET_FILE:spirv2air_cli> -DINPUT=${interpolate_SPV} -DARGS=
+        "-DEXPECT=declare <4 x float> @air.interpolate_offset_perspective.v4f32\\(%struct._interpolant_t addrspace\\(1\\)\\*, <2 x float>\\)"
+        -DVALIDATE=${s2a_validate} -DOBJDUMP=${s2a_objdump}
+        -DOUTPUT_DIR=${CMAKE_CURRENT_BINARY_DIR}/apple-tools-interpolate
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/apple_validate.cmake)
+      set_tests_properties(apple_tools_interpolate PROPERTIES LABELS CPU)
     endif()
     add_test(NAME cpu_strictmul_none COMMAND spirv2air_cli ${strictmul_none_SPV}
       ${CMAKE_CURRENT_BINARY_DIR}/strictmul-none.metallib --buffer 0:0:0 --buffer 0:1:1)
@@ -214,7 +228,7 @@ if(BUILD_TESTING AND SPIRV2AIR_BUILD_TESTS)
   if(SPIRV2AIR_BUILD_GPU_TESTS)
     enable_language(OBJCXX)
     set(CMAKE_OBJCXX_STANDARD 17)
-    foreach(name airkit compute tess frag cull dispatch tex math fc tilecull flat barycentric ordered)
+    foreach(name airkit compute tess frag cull dispatch tex math fc tilecull flat barycentric ordered interpolate)
       add_executable(${name}_gpu tests/${name}_gpu.mm)
       target_link_libraries(${name}_gpu PRIVATE spirv2air airkit "-framework Metal" "-framework Foundation")
       target_compile_options(${name}_gpu PRIVATE -fobjc-arc)
@@ -230,6 +244,8 @@ if(BUILD_TESTING AND SPIRV2AIR_BUILD_TESTS)
     add_test(NAME flat_gpu COMMAND flat_gpu ${flat_vert_SPV} ${flat_frag_SPV} ${narrow_SPV})
     add_test(NAME barycentric_gpu COMMAND barycentric_gpu ${barycentric_SPV})
     set_tests_properties(barycentric_gpu PROPERTIES SKIP_RETURN_CODE 77)
+    add_test(NAME interpolate_gpu COMMAND interpolate_gpu ${interpolate_SPV})
+    set_tests_properties(interpolate_gpu PROPERTIES SKIP_RETURN_CODE 77)
     add_test(NAME ordered_gpu COMMAND ordered_gpu ${ordered_SPV})
     set_tests_properties(ordered_gpu PROPERTIES SKIP_RETURN_CODE 77)
     add_test(NAME cull_gpu COMMAND cull_gpu ${cull_SPV})
@@ -240,6 +256,6 @@ if(BUILD_TESTING AND SPIRV2AIR_BUILD_TESTS)
     add_test(NAME tex_gpu COMMAND tex_gpu ${layer2da_SPV} ${tex2d_SPV} ${cube_SPV} ${cubearray_SPV} ${tex3d_SPV}
       ${layer2dagrad_SPV} ${cubegrad_SPV} ${tex3dgrad_SPV} ${lodbias_SPV})
     set_tests_properties(airkit_gpu compute_gpu tess_gpu frag_gpu strict_math_gpu strict_fma_gpu cull_gpu dispatch_gpu tex_gpu math_gpu fc_gpu tilecull_gpu flat_gpu barycentric_gpu ordered_gpu
-                         PROPERTIES LABELS GPU RUN_SERIAL TRUE)
+                         interpolate_gpu PROPERTIES LABELS GPU RUN_SERIAL TRUE)
   endif()
 endif()
