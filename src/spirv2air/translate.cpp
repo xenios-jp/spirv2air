@@ -203,6 +203,13 @@ class Translator {
     const auto* c = static_cast<const Constant*>(v);
     return c->ck == Constant::Int && c->bits != 0;
   }
+  static bool constU32(const Value* v, uint32_t& out) {
+    if (v->vk != Value::Const || v->type->kind != Type::Int) return false;
+    const auto* c = static_cast<const Constant*>(v);
+    if (c->ck != Constant::Int && c->ck != Constant::Null) return false;
+    out = c->ck == Constant::Int ? static_cast<uint32_t>(c->bits) : 0;
+    return true;
+  }
   Value* cint(int64_t v) { return m_.constInt(i32_, v); }
   Value* shiftAmount(Value* v);
   Value* integerDivide(Value* x, Value* y, uint16_t op);
