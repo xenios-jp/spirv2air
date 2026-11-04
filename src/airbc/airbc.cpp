@@ -568,9 +568,17 @@ unsigned log2Ceil(uint64_t x) { // llvm::Log2_32_Ceil
 
 class BitWriter {
 public:
-  std::vector<uint8_t> out;
-
-  uint64_t bitNo() const { return out.size() * 8 + bit_; }
+  uint64_t bitNo() const { return words_.size() * 32 + bit_; }
+  // The stream so far, flushed to a word boundary, as little-endian bytes.
+  std::vector<uint8_t> bytes() {
+    flushToWord();
+    std::vector<uint8_t> r(words_.size() * 4);
+    for (size_t k = 0; k < words_.size(); ++k) {
+      uint32_t w = words_[k];
+      for (unsigned b = 0; b < 4; ++b) r[4 * k + b] = uint8_t(w >> (8 * b));
+    }
+    return r;
+  }
 
   void emit(uint32_t val, unsigned n) {
     if (!n) return;
@@ -602,12 +610,16 @@ public:
 
   // Patch 32 bits at an arbitrary (already flushed) bit position — BackpatchWord.
   void patch32(uint64_t bitPos, uint32_t v) {
-    assert(bitPos + 32 <= out.size() * 8);
-    for (unsigned i = 0; i < 32; ++i) {
-      uint64_t b = bitPos + i;
-      uint8_t &byte = out[b >> 3];
-      byte = uint8_t((byte & ~(1u << (b & 7))) | (((v >> i) & 1u) << (b & 7)));
+    assert(bitPos + 32 <= words_.size() * 32);
+    size_t k = size_t(bitPos >> 5);
+    unsigned shift = unsigned(bitPos & 31);
+    if (!shift) {
+      words_[k] = v;
+      return;
     }
+    uint32_t low = (1u << shift) - 1;
+    words_[k] = (words_[k] & low) | (v << shift);
+    words_[k + 1] = (words_[k + 1] & ~low) | (v >> (32 - shift));
   }
   void patch64(uint64_t bitPos, uint64_t v) {
     patch32(bitPos, uint32_t(v));
@@ -619,7 +631,7 @@ public:
     emitVBR(id, 8);
     emitVBR(width, 4);
     flushToWord();
-    size_t sizePos = out.size();
+    size_t sizePos = words_.size();
     word(0);
     scopes_.push_back({width_, std::move(abbrevs_), sizePos});
     width_ = width;
@@ -632,8 +644,7 @@ public:
     flushToWord();
     Scope s = std::move(scopes_.back());
     scopes_.pop_back();
-    uint32_t words = uint32_t((out.size() - s.sizePos) / 4 - 1);
-    for (int i = 0; i < 4; ++i) out[s.sizePos + i] = uint8_t(words >> (8 * i));
+    words_[s.sizePos] = uint32_t(words_.size() - s.sizePos - 1);
     width_ = s.width;
     abbrevs_ = std::move(s.abbrevs);
   }
@@ -683,12 +694,7 @@ private:
     std::vector<std::shared_ptr<Abbrev>> abbrevs;
     size_t sizePos;
   };
-  void word(uint32_t w) {
-    size_t n = out.size();
-    out.resize(n + 4);
-    uint8_t *p = out.data() + n;
-    p[0] = uint8_t(w), p[1] = uint8_t(w >> 8), p[2] = uint8_t(w >> 16), p[3] = uint8_t(w >> 24);
-  }
+  void word(uint32_t w) { words_.push_back(w); }
   void encodeAbbrev(const Abbrev &a) {
     emit(2, width_); // DEFINE_ABBREV
     emitVBR(a.size(), 5);
@@ -727,8 +733,11 @@ private:
       } else if (op.k == AbbrevOp::Blob) {
         emitVBR(blobLen, 6);
         flushToWord();
-        out.insert(out.end(), blob, blob + blobLen);
-        while (out.size() & 3) out.push_back(0);
+        for (size_t k = 0; k < blobLen; k += 4) {
+          uint32_t w = 0;
+          for (size_t b = 0; b < 4 && k + b < blobLen; ++b) w |= uint32_t(blob[k + b]) << (8 * b);
+          word(w);
+        }
       } else {
         scalar(op, vals.at(vi++));
       }
@@ -736,6 +745,7 @@ private:
     if (vi != vals.size()) throw std::runtime_error("airbc: too many record operands for abbrev");
   }
 
+  std::vector<uint32_t> words_; // the flushed stream
   uint32_t cur_ = 0;
   unsigned bit_ = 0, width_ = 2, curBID_ = ~0u;
   std::vector<uint64_t> all_; // scratch for emitRecord
@@ -1165,8 +1175,7 @@ public:
     writeModule();
     if (O.symtab) writeSymtab();
     writeStrtab();
-    S.flushToWord();
-    std::vector<uint8_t> bc = std::move(S.out);
+    std::vector<uint8_t> bc = S.bytes();
     if (!O.darwinWrapper) return bc;
     // emitDarwinBCHeaderAndTrailer
     std::vector<uint8_t> r(20);
@@ -1536,8 +1545,8 @@ private:
       BitWriter w;
       std::string blob;
       for (unsigned i = 0; i < VE.numMDStrings; ++i) w.emitVBR(VE.mds[i]->str.size(), 6);
-      w.flushToWord();
-      blob.assign(w.out.begin(), w.out.end());
+      std::vector<uint8_t> sizes = w.bytes();
+      blob.assign(sizes.begin(), sizes.end());
       uint64_t offset = blob.size();
       for (unsigned i = 0; i < VE.numMDStrings; ++i) blob += VE.mds[i]->str;
       unsigned a = S.defineAbbrev({lit(35), vbr(6), vbr(6), kBlob});
