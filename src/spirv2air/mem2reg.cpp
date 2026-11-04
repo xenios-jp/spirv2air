@@ -26,10 +26,21 @@ bool constantIndex(const Value* v, uint64_t& out) {
   return true;
 }
 
+// The last round's rewrite of splitAggregates, left to promoteAllocas' first walk over every operand: instructions
+// with an id (tag - base < n) are the split GEPs; dead ones are removed, and an operand with a replacement takes it.
+struct SplitRewrite {
+  uint32_t base = 0;
+  unsigned n = 0;
+  std::vector<Value*> repl;
+  std::vector<char> dead;
+  unsigned idOf(const Value* v) const { return v->tag - base < n && v->vk == Value::Inst ? v->tag - base : ~0u; }
+};
+
 // Splits each entry-block array or struct alloca whose only uses are GEPs `0, c, ...` with constant indices into one
 // alloca per element; a GEP `0, c` becomes element c's alloca and a longer one a GEP into it. Repeats until nothing
-// splits, so nested aggregates split level by level.
-void splitAggregates(Module& m, Function* f) {
+// splits, so nested aggregates split level by level. The split aggregates leave the entry block here; the rest of
+// the last round's rewrite is left in `rewrite`.
+void splitAggregates(Module& m, Function* f, SplitRewrite& rewrite) {
   BasicBlock* entry = f->blocks[0];
   for (bool changed = true; changed;) {
     changed = false;
@@ -70,9 +81,10 @@ void splitAggregates(Module& m, Function* f) {
     std::vector<Instruction*> insts;
     bool nested = false;  // an element is itself an aggregate, which the next round may split
     for (Instruction* i : entry->insts) {
-      insts.push_back(i);
       int a = aggregateOf(i);
-      if (a < 0 || geps[a].empty() || unsplittable[a]) continue;
+      bool split = a >= 0 && !geps[a].empty() && !unsplittable[a];
+      if (!split) insts.push_back(i);
+      if (!split) continue;
       std::unordered_map<uint64_t, Instruction*> elements;
       for (Instruction* g : geps[a]) {
         uint64_t c = 0;
@@ -103,28 +115,39 @@ void splitAggregates(Module& m, Function* f) {
     entry->insts = std::move(insts);
     if (!changed) break;
     // Instructions created above (the element allocas) have tag 0, which is outside [base, base + next).
-    auto idOf = [&](const Value* v) { return v->tag - base < next && v->vk == Value::Inst ? v->tag - base : ~0u; };
+    rewrite = {base, next, std::move(repl), std::move(dead)};
+    if (!nested) break;
+    auto idOf = [&](const Value* v) { return rewrite.idOf(v); };
     for (BasicBlock* b : f->blocks) {
       std::vector<Instruction*>& list = b->insts;
       list.erase(std::remove_if(list.begin(), list.end(),
                                 [&](Instruction* i) {
                                   unsigned k = idOf(i);
-                                  return k != ~0u && dead[k];
+                                  return k != ~0u && rewrite.dead[k];
                                 }),
                  list.end());
       for (Instruction* i : list)
         for (Value*& v : i->ops)
-          if (unsigned k = idOf(v); k != ~0u && repl[k]) v = repl[k];
+          if (unsigned k = idOf(v); k != ~0u && rewrite.repl[k]) v = rewrite.repl[k];
     }
-    changed = nested;
+    rewrite = {};
   }
 }
+
+// A row of a compressed adjacency list.
+struct Row {
+  const int *first, *last;
+  const int* begin() const { return first; }
+  const int* end() const { return last; }
+  size_t size() const { return size_t(last - first); }
+};
 
 }  // namespace
 
 void promoteAllocas(Module& m, Function* f) {
   if (f->blocks.empty()) return;
-  splitAggregates(m, f);
+  SplitRewrite split;
+  splitAggregates(m, f, split);
   const std::vector<BasicBlock*>& blocks = f->blocks;
   const size_t n = blocks.size();
 
@@ -136,6 +159,7 @@ void promoteAllocas(Module& m, Function* f) {
     if (i->op == Op::Alloca) allocas.push_back(i);
   if (allocas.empty()) return;
   const unsigned A = unsigned(allocas.size());
+  // An upper bound until the walk below removes the split's dead GEPs.
   unsigned ninsts = 0;
   for (const BasicBlock* b : blocks) ninsts += unsigned(b->insts.size());
   uint32_t base = m.allocTags(ninsts);
@@ -147,8 +171,21 @@ void promoteAllocas(Module& m, Function* f) {
     return k < A && v->vk == Value::Inst && allocas[k] == v ? int(k) : -1;
   };
   std::vector<char> promotable(A, 1);
-  for (BasicBlock* b : blocks)
-    for (Instruction* i : b->insts)
+  ninsts = 0;
+  for (BasicBlock* b : blocks) {
+    std::vector<Instruction*>& list = b->insts;
+    if (split.n) {
+      size_t kept = 0;
+      for (Instruction* i : list) {
+        if (unsigned k = split.idOf(i); k != ~0u && split.dead[k]) continue;
+        for (Value*& v : i->ops)
+          if (unsigned k = split.idOf(v); k != ~0u && split.repl[k]) v = split.repl[k];
+        list[kept++] = i;
+      }
+      list.resize(kept);
+    }
+    ninsts += unsigned(list.size());
+    for (Instruction* i : list)
       for (size_t k = 0; k < i->ops.size(); ++k) {
         int a = allocaOf(i->ops[k]);
         if (a < 0) continue;
@@ -157,6 +194,7 @@ void promoteAllocas(Module& m, Function* f) {
             (i->op == Op::Load && k == 0 && i->type == t) || (i->op == Op::Store && k == 1 && i->ops[0]->type == t);
         if (!whole || i->isVolatile) promotable[a] = 0;
       }
+  }
   std::vector<Instruction*> slots;
   std::vector<int> slotIndex(A, -1);  // by alloca index
   for (unsigned a = 0; a < A; ++a)
@@ -170,20 +208,35 @@ void promoteAllocas(Module& m, Function* f) {
   };
 
   // CFG. Edges are kept per terminator operand, so a switch with two cases to one block gives two edges, and that
-  // block's phis two entries for it, as LLVM requires.
+  // block's phis two entries for it, as LLVM requires. Block b's successors are succ[succAt[b] .. succAt[b + 1]), its
+  // predecessors likewise in pred.
   const uint32_t bbase = m.allocTags(unsigned(n));
   for (size_t b = 0; b < n; ++b) blocks[b]->tag = bbase + uint32_t(b);
-  std::vector<std::vector<int>> succ(n), pred(n);
-  for (size_t b = 0; b < n; ++b) {
-    if (blocks[b]->insts.empty()) continue;
+  auto edges = [&](size_t b) -> const decltype(Instruction::bbs)* {
+    if (blocks[b]->insts.empty()) return nullptr;
     const Instruction* t = blocks[b]->insts.back();
-    if (t->op != Op::Br && t->op != Op::Switch) continue;
-    for (BasicBlock* s : t->bbs) {
-      int j = int(s->tag - bbase);
-      succ[b].push_back(j);
-      pred[j].push_back(int(b));
+    return t->op == Op::Br || t->op == Op::Switch ? &t->bbs : nullptr;
+  };
+  std::vector<int> succAt(n + 1, 0), predAt(n + 1, 0);
+  for (size_t b = 0; b < n; ++b)
+    if (const auto* e = edges(b)) {
+      succAt[b + 1] = int(e->size());
+      for (BasicBlock* s : *e) ++predAt[s->tag - bbase + 1];
     }
-  }
+  for (size_t b = 0; b < n; ++b) succAt[b + 1] += succAt[b], predAt[b + 1] += predAt[b];
+  std::vector<int> succ(static_cast<size_t>(succAt[n])), pred(static_cast<size_t>(predAt[n]));
+  std::vector<int> predFill(predAt.begin(), predAt.end() - 1);
+  for (size_t b = 0; b < n; ++b)
+    if (const auto* e = edges(b)) {
+      int k = succAt[b];
+      for (BasicBlock* s : *e) {
+        int j = int(s->tag - bbase);
+        succ[size_t(k++)] = j;
+        pred[size_t(predFill[size_t(j)]++)] = int(b);
+      }
+    }
+  auto succs = [&](size_t b) { return Row{succ.data() + succAt[b], succ.data() + succAt[b + 1]}; };
+  auto preds = [&](size_t b) { return Row{pred.data() + predAt[b], pred.data() + predAt[b + 1]}; };
 
   // Postorder from the entry; blocks it never reaches keep po == -1.
   std::vector<int> post, po(n, -1);
@@ -193,8 +246,8 @@ void promoteAllocas(Module& m, Function* f) {
     seen[0] = 1;
     while (!stack.empty()) {
       auto& [b, k] = stack.back();
-      if (k < succ[b].size()) {
-        int s = succ[b][k++];
+      if (Row r = succs(size_t(b)); k < r.size()) {
+        int s = r.first[k++];
         if (!seen[s]) seen[s] = 1, stack.push_back({s, 0});
       } else {
         po[b] = int(post.size());
@@ -212,7 +265,7 @@ void promoteAllocas(Module& m, Function* f) {
     for (int b : rpo) {
       if (b == 0) continue;
       int d = -1;
-      for (int p : pred[b]) {
+      for (int p : preds(size_t(b))) {
         if (idom[p] < 0) continue;
         if (d < 0) {
           d = p;
@@ -231,8 +284,8 @@ void promoteAllocas(Module& m, Function* f) {
   std::vector<std::vector<int>> frontier(n), children(n);
   for (int b : rpo) {
     if (b != 0) children[idom[b]].push_back(b);
-    if (pred[b].size() < 2) continue;
-    for (int p : pred[b])
+    if (preds(size_t(b)).size() < 2) continue;
+    for (int p : preds(size_t(b)))
       for (int r = p; po[r] >= 0 && r != idom[b]; r = idom[r]) frontier[r].push_back(b);
   }
 
@@ -320,7 +373,7 @@ void promoteAllocas(Module& m, Function* f) {
       }
       dead[number(i)] = 1;
     }
-    for (int s : succ[b])
+    for (int s : succs(size_t(b)))
       for (auto& [a, phi] : phis[s]) phi->ops.push_back(current(a)), phi->bbs.push_back(blocks[b]);
     for (auto c = children[b].rbegin(); c != children[b].rend(); ++c) walk.push_back({*c, false});
   }
@@ -333,7 +386,7 @@ void promoteAllocas(Module& m, Function* f) {
       if (i->op == Op::Load) repl[number(i)] = m.constUndef(slots[a]->srcElemTy);
       dead[number(i)] = 1;
     }
-    for (int s : succ[b])
+    for (int s : succs(size_t(b)))
       for (auto& [a, phi] : phis[s])
         phi->ops.push_back(m.constUndef(slots[a]->srcElemTy)), phi->bbs.push_back(blocks[b]);
   }
