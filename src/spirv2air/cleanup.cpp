@@ -388,32 +388,39 @@ class Cleaner {
 
   // F: removable instructions no live instruction reaches through its operands.
   bool sweepDead() {
+    // live: the instructions that stay, those not removable and those a staying one uses. Each instruction is
+    // classified once, and the blocks are only rewritten when something is dead.
     std::vector<char> live(n_, 0);
     std::vector<const Instruction*> work;
+    size_t kept = 0, total = 0;
     auto mark = [&](const Instruction* i) {
       for (const Value* v : i->ops)
-        if (unsigned k = id(v); k != ~0u && !live[k]) live[k] = 1, work.push_back(static_cast<const Instruction*>(v));
+        if (unsigned k = id(v); k != ~0u && !live[k])
+          live[k] = 1, ++kept, work.push_back(static_cast<const Instruction*>(v));
     };
-    for (const BasicBlock* b : f_->blocks)
-      for (const Instruction* i : b->insts)
-        if (!removable(i, pureCalls_)) mark(i);
+    for (const BasicBlock* b : f_->blocks) {
+      total += b->insts.size();
+      for (const Instruction* i : b->insts) {
+        if (removable(i, pureCalls_)) continue;
+        if (!live[id(i)]) live[id(i)] = 1, ++kept;
+        mark(i);
+      }
+    }
     while (!work.empty()) {
       const Instruction* i = work.back();
       work.pop_back();
       mark(i);
     }
-    bool changed = false;
+    if (kept == total) return false;
     for (BasicBlock* b : f_->blocks) {
       auto dead = [&](Instruction* i) {
-        if (!removable(i, pureCalls_) || live[id(i)]) return false;
+        if (live[id(i)]) return false;
         ++(i->op == Op::Phi ? stats_.deadPhis : stats_.deadInsts);
         return true;
       };
-      auto end = std::remove_if(b->insts.begin(), b->insts.end(), dead);
-      changed |= end != b->insts.end();
-      b->insts.erase(end, b->insts.end());
+      b->insts.erase(std::remove_if(b->insts.begin(), b->insts.end(), dead), b->insts.end());
     }
-    return changed;
+    return true;
   }
 
   Module& m_;
