@@ -10,6 +10,7 @@
 #include <fstream>
 #include <limits>
 #include <stdexcept>
+#include <array>
 #include <string>
 #include <vector>
 
@@ -118,6 +119,17 @@ int main(int argc, char** argv) {
  else if (flag == "--storage-buffer" && i + 1 < argc) opts.graphics.storageBuffers.push_back(storageSlot(argv[++i]));
       else if (flag == "--function-constant-set" && i + 1 < argc) opts.graphics.functionConstantSet = int32_t(number(argv[++i]));
       else if (flag == "--framebuffer-fetch-mask" && i + 1 < argc) opts.graphics.framebufferFetchMask = uint32_t(number(argv[++i]));
+      else if (flag == "--function-constant" && i + 1 < argc) {
+        // BINDING=a,b,c,d: bake the uint4 value of a function constant.
+        std::string value = argv[++i];
+        size_t eq = value.find('=');
+        if (eq == std::string::npos) throw std::runtime_error("--function-constant BINDING=a,b,c,d");
+        std::array<uint32_t, 4> lanes{};
+        std::stringstream parts(value.substr(eq + 1));
+        std::string part;
+        for (size_t lane = 0; lane < 4 && std::getline(parts, part, ','); ++lane) lanes[lane] = uint32_t(number(part.c_str()));
+        opts.graphics.functionConstantValues[uint32_t(number(value.substr(0, eq).c_str()))] = lanes;
+      }
       else if (flag == "--platform" && i + 1 < argc) {
         std::string value = argv[++i];
         if (value == "macos") opts.platform = spirv2air::Platform::MacOS;

@@ -1532,6 +1532,12 @@ bool Translator::isFunctionConstant(uint32_t var) const {
 // through an internal global that a static initializer fills from an "air.fc_initializer" constant, which Metal
 // replaces with the value given at specialization. Here the shader reads that constant directly.
 Value* Translator::functionConstant(uint32_t binding) {
+  if (auto baked = options_.graphics.functionConstantValues.find(binding);
+      baked != options_.graphics.functionConstantValues.end()) {
+    std::vector<Constant*> lanes;
+    for (uint32_t lane : baked->second) lanes.push_back(m_.constInt(i32_, int64_t(int32_t(lane))));
+    return m_.constAggregate(m_.vecTy(i32_, 4), lanes);
+  }
   GlobalVariable*& g = fcGlobals_[binding];
   if (!g) {
     Type* t = m_.vecTy(i32_, 4);

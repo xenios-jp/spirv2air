@@ -5,7 +5,9 @@
 // Unsupported constructs return a diagnostic in Result::error. See the public README for the supported subset.
 #pragma once
 #include <cstddef>
+#include <array>
 #include <cstdint>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -62,6 +64,11 @@ struct GraphicsBindings {
   // until every constant it uses has a value. Negative disables this (default). The set takes precedence over
   // constantsSet.
   int32_t functionConstantSet = -1;
+  // Function constant values baked into the code: binding -> the uint4 value. A bound constant is read as a plain
+  // constant (the module has no function constant for it and the code folds it); a binding without an entry stays a
+  // Metal function constant. The result then needs no specialization in Metal, which costs the host a compile
+  // of its own when the system shader cache is cold.
+  std::map<uint32_t, std::array<uint32_t, 4>> functionConstantValues;
   // Further StorageBuffer variables, besides shared memory and the occlusion counter (xenia's tile cull bounds:
   // {0, 4, 112}). A StorageBuffer variable matching none of the entries is rejected.
   std::vector<StorageBufferSlot> storageBuffers;
