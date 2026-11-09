@@ -75,7 +75,10 @@ struct GraphicsBindings {
   // Heap records hold 64-bit handles. Defaults: {buffer address, texture handle, metadata}.
   uint32_t descriptorStride = 24, textureHandleOffset = 8, samplerHandleOffset = 0;
   // Opt-in ordered framebuffer feedback: InputAttachmentIndex N maps to Metal color(N).
-  // Float4 SubpassData reads must use zero coordinates and, for MSAA, the current SampleId.
+  // Float4 SubpassData reads must use zero coordinates and, for a multisampled image, the current SampleId.
+  // A single-sampled SubpassData image may stand for a multisampled attachment: its read is the current
+  // sample's color, and the function keeps running per pixel, with only the code that depends on the read
+  // run per sample. SampleId, by contrast, runs the whole function per sample.
   // The caller binds the matching color attachment and disables fixed-function blending.
   // Include this mask in shader cache keys. Zero preserves the default resource ABI.
   uint32_t framebufferFetchMask = 0;

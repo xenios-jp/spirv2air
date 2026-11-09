@@ -192,6 +192,12 @@ rejected. Every attachment requires a matching float4 color output. Both sides
 use raster order group zero, preserving feedback between overlapping primitives
 within a draw. No texture heap or descriptor entry is consumed for an attachment.
 
+A single-sampled `SubpassData` image may be read for a multisampled attachment. Metal
+returns the current sample's color, and runs only the code that depends on the read
+per sample; reading `SampleId` instead runs the whole function per sample (3.7-4.2x
+on 4x MSAA layers of a heavy shader, measured on an M5 Pro). Use the multisampled
+form only when the shader needs `SampleId` anyway.
+
 `feedback_gpu` checks 100 overlapping primitives in one draw followed by 20 in a
 second draw at 1×/2×/4× MSAA. A second case seeds distinct per-sample values and
 uses `SampleId` only for the attachment read. These tests establish ordered
