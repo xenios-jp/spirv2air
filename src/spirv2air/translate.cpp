@@ -2061,8 +2061,10 @@ void Translator::translate(const Inst& in) {
     // ---- conversions
     case spv::OpConvertFToU:
     case spv::OpConvertFToS:
-      if (compute() && (op(2)->type == f32_ || (op(2)->type->kind == Type::Vector && op(2)->type->elem == f32_))) {
-        // MSL's float -> int conversion saturates (and maps NaN to 0); fptoui/fptosi would be undefined out of range.
+      if (op(2)->type == f32_ || (op(2)->type->kind == Type::Vector && op(2)->type->elem == f32_)) {
+        // The conversion Apple's compiler writes for an MSL cast: it saturates and maps NaN to 0 (the results of
+        // Direct3D's ftoi and ftou), in every stage. fptoui/fptosi would be poison out of range, and guest shaders
+        // convert values they do not control the range of (a vertex index register, for one).
         bool sign = in.op == spv::OpConvertFToS;
         set(perComponent({op(2)}, [&](const std::vector<Value*>& s) {
           return intrinsic(sign ? "air.convert.s.i32.f.f32" : "air.convert.u.i32.f.f32", i32_, s, AttrClass::Pure);
