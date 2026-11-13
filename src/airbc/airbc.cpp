@@ -667,6 +667,17 @@ unsigned log2Ceil(uint64_t x) { // llvm::Log2_32_Ceil
   return r;
 }
 
+// A borrowed run of record operands, so that a braced list or a reused vector is passed without a std::vector made for the call.
+struct U64Ref {
+  U64Ref(std::initializer_list<uint64_t> l) : first(l.begin()), last(l.end()) {}
+  U64Ref(const std::vector<uint64_t> &v) : first(v.data()), last(v.data() + v.size()) {}
+  const uint64_t *begin() const { return first; }
+  const uint64_t *end() const { return last; }
+  size_t size() const { return size_t(last - first); }
+  uint64_t operator[](size_t k) const { return first[k]; }
+  const uint64_t *first, *last;
+};
+
 class BitWriter {
 public:
   uint64_t bitNo() const { return words_.size() * 32 + bit_; }
@@ -770,7 +781,7 @@ public:
     return unsigned(v.size()) + 3;
   }
 
-  void emitRecord(unsigned code, const std::vector<uint64_t> &vals, unsigned abbrev = 0) {
+  void emitRecord(unsigned code, U64Ref vals, unsigned abbrev = 0) {
     if (!abbrev) {
       emit(3, width_); // UNABBREV_RECORD
       emitVBR(code, 6);
@@ -784,7 +795,7 @@ public:
     emitAbbreviated(abbrev, all_, nullptr, 0);
   }
   // vals[0] is the record code.
-  void emitWithAbbrev(unsigned abbrev, const std::vector<uint64_t> &vals, const void *blob = nullptr,
+  void emitWithAbbrev(unsigned abbrev, U64Ref vals, const void *blob = nullptr,
                       size_t blobLen = 0) {
     emitAbbreviated(abbrev, vals, static_cast<const uint8_t *>(blob), blobLen);
   }
@@ -818,7 +829,7 @@ private:
     default: throw std::runtime_error("airbc: bad scalar abbrev op");
     }
   }
-  void emitAbbreviated(unsigned id, const std::vector<uint64_t> &vals, const uint8_t *blob, size_t blobLen) {
+  void emitAbbreviated(unsigned id, U64Ref vals, const uint8_t *blob, size_t blobLen) {
     const Abbrev &a = *abbrevs_.at(id - 4);
     emit(id, width_);
     size_t vi = 0;
@@ -840,7 +851,7 @@ private:
           word(w);
         }
       } else {
-        scalar(op, vals.at(vi++));
+        scalar(op, vals[vi++]);
       }
     }
     if (vi != vals.size()) throw std::runtime_error("airbc: too many record operands for abbrev");
@@ -1246,6 +1257,7 @@ StringEncoding stringEncoding(const std::string &s) {
 
 std::vector<uint64_t> bytesU(const std::string &s) {
   std::vector<uint64_t> r;
+  r.reserve(s.size());
   for (unsigned char c : s) r.push_back(c);
   return r;
 }
@@ -1625,8 +1637,9 @@ private:
   void writeModuleMetadataKinds() {
     if (O.mdKinds.empty()) return;
     S.enterBlock(METADATA_KIND_BLOCK_ID, 3);
+    std::vector<uint64_t> r;
     for (unsigned i = 0; i < O.mdKinds.size(); ++i) {
-      std::vector<uint64_t> r = {i};
+      r.assign(1, i);
       for (unsigned char c : O.mdKinds[i]) r.push_back(c);
       S.emitRecord(6 /*METADATA_KIND*/, r);
     }
