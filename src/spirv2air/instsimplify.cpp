@@ -2,9 +2,17 @@
 // whose result is known (a constant, or an existing value) is recorded in a replacement map; operands are resolved
 // through the map as the walk goes and rewritten at the end. Everything is exact: scalar integer arithmetic wraps as
 // the instruction does, folds that would be poison (shift by >= the width, division by zero or of INT_MIN by -1) are
-// left alone, and no float is computed except by moving bits (fneg of a constant, bitcast of a constant).
+// left alone, and no float is computed except by moving bits (fneg of a constant, bitcast of a constant) or where the
+// result is an exact integer whatever the rounding mode and fast-math setting (see foldCall and foldCast's int -> float).
+// Known and accepted: like any change to the emitted code, a fold can move pixels whose value is undefined to begin
+// with (implicit derivatives in non-uniform control flow follow Apple's register assignment). No defined value
+// changes. See docs/air.md, "Implicit derivatives in non-uniform control flow", before reading such a frame
+// difference as a miscompile.
 #include "spirv2air/instsimplify.h"
 
+#include <cstring>
+#include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "airbc.h"
@@ -30,6 +38,53 @@ bool constInt(const Value* v, uint64_t& out) {
   if (c->ck != Constant::Int && c->ck != Constant::Null) return false;
   out = c->ck == Constant::Int ? c->bits : 0;
   return true;
+}
+
+// A scalar f32 constant's bits (a null one is +0.0).
+bool constF32(const Value* v, uint32_t& out) {
+  if (v->vk != Value::Const || v->type->kind != Type::Float) return false;
+  const auto* c = static_cast<const Constant*>(v);
+  if (c->ck != Constant::FP && c->ck != Constant::Null) return false;
+  out = c->ck == Constant::FP ? uint32_t(c->bits) : 0;
+  return true;
+}
+
+// The value of an f32 whose bits are `b` if it is a finite integer other than -0.0, which every rounding of it
+// (rint, trunc, floor, ceil) returns unchanged under any rounding mode, and which fast math (no NaN, no infinity, no
+// signed zero, denormals flushed) treats like strict math: it is none of the values those settings change. Denormals
+// are not integers; +0.0 is.
+bool exactIntegralF32(uint32_t b, double& value) {
+  if (b == 0x80000000u) return false;  // -0.0: fast math may not keep the sign
+  const uint32_t exponent = (b >> 23) & 0xFF;
+  if (exponent == 0xFF) return false;                    // infinity, NaN
+  if (exponent == 0 && (b & 0x7FFFFF)) return false;     // denormal
+  float f;
+  std::memcpy(&f, &b, 4);
+  // Every float of magnitude >= 2^23 is an integer; below that the cast to int64 is exact for integers.
+  if (exponent < 150 && double(int64_t(f)) != double(f)) return false;
+  value = double(f);
+  return true;
+}
+
+// The AIR intrinsics foldCall evaluates, by callee name.
+enum class Intrinsic : uint8_t {
+  None, ExtractBitsU, ExtractBitsS, InsertBits, MinS, MinU, MaxS, MaxU, RoundToIntegral, ConvertU, ConvertS
+};
+
+Intrinsic classifyIntrinsic(const std::string& name) {
+  static const std::unordered_map<std::string, Intrinsic> kNames = {
+      {"air.extract_bits.u.i32", Intrinsic::ExtractBitsU}, {"air.extract_bits.s.i32", Intrinsic::ExtractBitsS},
+      {"air.insert_bits.u.i32", Intrinsic::InsertBits},
+      {"air.min.s.i32", Intrinsic::MinS},                  {"air.min.u.i32", Intrinsic::MinU},
+      {"air.max.s.i32", Intrinsic::MaxS},                  {"air.max.u.i32", Intrinsic::MaxU},
+      {"air.rint.f32", Intrinsic::RoundToIntegral},        {"air.fast_rint.f32", Intrinsic::RoundToIntegral},
+      {"air.trunc.f32", Intrinsic::RoundToIntegral},       {"air.fast_trunc.f32", Intrinsic::RoundToIntegral},
+      {"air.floor.f32", Intrinsic::RoundToIntegral},       {"air.fast_floor.f32", Intrinsic::RoundToIntegral},
+      {"air.ceil.f32", Intrinsic::RoundToIntegral},        {"air.fast_ceil.f32", Intrinsic::RoundToIntegral},
+      {"air.convert.u.i32.f.f32", Intrinsic::ConvertU},    {"air.convert.s.i32.f.f32", Intrinsic::ConvertS},
+  };
+  auto it = kNames.find(name);
+  return it == kNames.end() ? Intrinsic::None : it->second;
 }
 
 class Simplifier {
@@ -203,6 +258,24 @@ class Simplifier {
       }
       return nullptr;
     }
+    // An integer constant converted to f32 when the float holds it exactly (at most 24 significant bits): there is
+    // nothing to round, so the result is the same under every rounding mode, and it is not a value fast math treats
+    // differently (finite, never -0.0, never a denormal).
+    if ((i->sub == SIToFP || i->sub == UIToFP) && isScalarInt(from) && from->n <= 32 && to->kind == Type::Float &&
+        constInt(a, x)) {
+      const unsigned w = from->n;
+      const bool negative = i->sub == SIToFP && signExtend(x, w) < 0;
+      const uint64_t magnitude = negative ? uint64_t(-signExtend(x, w)) : x & widthMask(w);
+      if (magnitude > (1ull << 24)) {
+        // Exact only if the bits below the top 24 are zero.
+        unsigned top = 63 - unsigned(__builtin_clzll(magnitude));
+        if (magnitude & ((1ull << (top - 23)) - 1)) return nullptr;
+      }
+      const float f = negative ? -float(magnitude) : float(magnitude);
+      uint32_t bits;
+      std::memcpy(&bits, &f, 4);
+      return m_.constFPBits(to, bits);
+    }
     if (!isScalarInt(from) || !isScalarInt(to)) return nullptr;
     if (constInt(a, x)) {
       switch (i->sub) {
@@ -311,6 +384,81 @@ class Simplifier {
     return nullptr;
   }
 
+  // Calls of AIR intrinsics on constants, where the result is defined bit for bit (scalar forms; spirv2air writes
+  // the per-component calls). Each rule's exactness argument:
+  //  - extract_bits.{u,s}(base, offset, count): the bits [offset, offset + count) of base, zero- or sign-extended
+  //    from bit count - 1. Integer bit moves; folded only for 1 <= count and offset + count <= 32, where Metal defines
+  //    the result (count 0 is left to the translator's guard, past bit 31 is undefined).
+  //  - insert_bits(base, insert, offset, count): base with bits [offset, offset + count) replaced by the low count bits
+  //    of insert. Same domain as extract_bits.
+  //  - min/max.{s,u}.i32: integer compares; always defined. min(x, x) and max(x, x) are x.
+  //  - rint/trunc/floor/ceil (fast and precise): a constant that is already an integer (finite, not -0.0) is returned
+  //    unchanged by all four under any rounding mode and fast-math setting; other constants are left alone (their
+  //    result would depend on the rounding direction, and rint's on the current mode).
+  //  - convert.{u,s}.i32.f.f32 (Apple's saturating float -> int): a constant that is an integer inside the target
+  //    range converts to that integer with no rounding and no saturation; +-0.0 converts to 0 whatever the sign
+  //    (integers have one zero). NaN, infinities, out-of-range values (saturated) and fractions are left alone.
+  Value* foldCall(Instruction* i) {
+    if (i->ops.empty() || i->ops[0]->vk != Value::Func) return nullptr;
+    const Value* callee = i->ops[0];
+    auto [it, fresh] = intrinsics_.try_emplace(callee, Intrinsic::None);
+    if (fresh) it->second = classifyIntrinsic(callee->name);
+    const Intrinsic kind = it->second;
+    if (kind == Intrinsic::None) return nullptr;
+    Type* t = i->type;
+    auto arg = [&](unsigned k) { return i->ops[1 + k]; };
+    const unsigned nargs = unsigned(i->ops.size()) - 1;
+    uint64_t x, y, z, u;
+    switch (kind) {
+      case Intrinsic::ExtractBitsU:
+      case Intrinsic::ExtractBitsS:
+        if (nargs != 3 || !isScalarInt(t) || t->n != 32) return nullptr;
+        if (!constInt(arg(0), x) || !constInt(arg(1), y) || !constInt(arg(2), z)) return nullptr;
+        if (z == 0 || y >= 32 || z > 32 - y) return nullptr;
+        x = (x >> y) & widthMask(unsigned(z));
+        return cint(t, kind == Intrinsic::ExtractBitsS ? uint64_t(signExtend(x, unsigned(z))) : x);
+      case Intrinsic::InsertBits: {
+        if (nargs != 4 || !isScalarInt(t) || t->n != 32) return nullptr;
+        if (!constInt(arg(0), x) || !constInt(arg(1), y) || !constInt(arg(2), z) || !constInt(arg(3), u))
+          return nullptr;
+        if (u == 0 || z >= 32 || u > 32 - z) return nullptr;
+        const uint64_t field = widthMask(unsigned(u)) << z;
+        return cint(t, (x & ~field) | ((y << z) & field));
+      }
+      case Intrinsic::MinS:
+      case Intrinsic::MinU:
+      case Intrinsic::MaxS:
+      case Intrinsic::MaxU: {
+        if (nargs != 2 || !isScalarInt(t)) return nullptr;
+        if (arg(0) == arg(1)) return arg(0);
+        if (!constInt(arg(0), x) || !constInt(arg(1), y)) return nullptr;
+        const unsigned w = t->n;
+        const bool sign = kind == Intrinsic::MinS || kind == Intrinsic::MaxS;
+        const bool less = sign ? signExtend(x, w) < signExtend(y, w) : x < y;
+        const bool min = kind == Intrinsic::MinS || kind == Intrinsic::MinU;
+        return min == less ? arg(0) : arg(1);
+      }
+      case Intrinsic::RoundToIntegral: {
+        uint32_t b;
+        double v;
+        if (nargs != 1 || t->kind != Type::Float || !constF32(arg(0), b) || !exactIntegralF32(b, v)) return nullptr;
+        return arg(0);
+      }
+      case Intrinsic::ConvertU:
+      case Intrinsic::ConvertS: {
+        uint32_t b;
+        double v;
+        if (nargs != 1 || !isScalarInt(t) || t->n != 32 || !constF32(arg(0), b)) return nullptr;
+        if (b == 0x80000000u) return cint(t, 0);
+        if (!exactIntegralF32(b, v)) return nullptr;
+        if (kind == Intrinsic::ConvertU ? (v < 0 || v > 4294967295.0) : (v < -2147483648.0 || v > 2147483647.0))
+          return nullptr;
+        return cint(t, uint64_t(int64_t(v)));
+      }
+      default: return nullptr;
+    }
+  }
+
   Value* simplify(Instruction* i) {
     switch (i->op) {
       case Op::BinOp: return isScalarInt(i->type) ? foldBinOp(i) : nullptr;
@@ -319,6 +467,7 @@ class Simplifier {
       case Op::Select: return foldSelect(i);
       case Op::FNeg: return foldFNeg(i);
       case Op::ExtractValue: return foldExtractValue(i);
+      case Op::Call: return foldCall(i);
       default: return nullptr;
     }
   }
@@ -328,6 +477,7 @@ class Simplifier {
   uint32_t ibase_ = 0;
   unsigned n_ = 0;
   std::vector<Value*> repl_;
+  std::unordered_map<const Value*, Intrinsic> intrinsics_;  // per callee
 };
 
 }  // namespace
