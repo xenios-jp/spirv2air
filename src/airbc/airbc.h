@@ -284,6 +284,50 @@ struct NamedMD {
 };
 
 // ---------------------------------------------------------------- module
+// Interned objects in an open-addressing table (linear probing, never shrinks). The caller supplies the hash and the test
+// that a candidate is the object it wants, so a lookup builds no key; nothing is ever removed.
+template <class T> class InternTable {
+public:
+  template <class Eq> T *find(size_t h, Eq &&eq) const {
+    if (slots_.empty()) return nullptr;
+    for (size_t k = h & mask_;; k = (k + 1) & mask_) {
+      const Slot &s = slots_[k];
+      if (!s.v) return nullptr;
+      if (s.h == h && eq(static_cast<const T *>(s.v))) return s.v;
+    }
+  }
+  void insert(size_t h, T *v) {
+    if (2 * (size_ + 1) > slots_.size()) grow();
+    place(h, v);
+    ++size_;
+  }
+  static size_t mix(size_t h, uint64_t x) {
+    h = (h ^ x) * 0x9E3779B97F4A7C15ull;
+    return h ^ (h >> 29);
+  }
+
+private:
+  struct Slot {
+    size_t h;
+    T *v;
+  };
+  void place(size_t h, T *v) {
+    size_t k = h & mask_;
+    while (slots_[k].v) k = (k + 1) & mask_;
+    slots_[k] = {h, v};
+  }
+  void grow() {
+    std::vector<Slot> old;
+    old.swap(slots_);
+    slots_.assign(old.empty() ? 128 : old.size() * 2, Slot{0, nullptr});
+    mask_ = slots_.size() - 1;
+    for (const Slot &s : old)
+      if (s.v) place(s.h, s.v);
+  }
+  std::vector<Slot> slots_;
+  size_t mask_ = 0, size_ = 0;
+};
+
 class Module {
 public:
   std::string triple, datalayout, sourceFileName;
@@ -378,6 +422,8 @@ private:
     Constant *c = nullptr;
     bool fp = false;
   } constCache_[256];      // direct-mapped, in front of constIntern_ (constants are never removed)
+  InternTable<Type> typeTable_;          // pointer, vector and array types
+  InternTable<Constant> constTable_;     // integer, floating-point and aggregate constants
   std::unordered_map<std::string, Type *> typeIntern_;
   std::unordered_map<std::string, Constant *> constIntern_;
   std::unordered_map<std::string, Metadata *> mdIntern_;

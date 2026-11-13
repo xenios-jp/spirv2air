@@ -109,30 +109,33 @@ Type *Module::intTy(unsigned w) {
   return t;
 }
 Type *Module::ptrTy(Type *pointee, unsigned as) {
-  Type *&t = typeIntern_["p" + ptrKey(pointee) + numKey(as)];
-  if (!t) {
-    t = newType(Type::Pointer);
-    t->elem = pointee;
-    t->n = as;
-  }
+  const size_t h = typeTable_.mix(typeTable_.mix(1, reinterpret_cast<uintptr_t>(pointee)), as);
+  if (Type *t = typeTable_.find(h, [&](const Type *t) { return t->kind == Type::Pointer && t->elem == pointee && t->n == as; }))
+    return t;
+  Type *t = newType(Type::Pointer);
+  t->elem = pointee;
+  t->n = as;
+  typeTable_.insert(h, t);
   return t;
 }
 Type *Module::vecTy(Type *elem, unsigned n) {
-  Type *&t = typeIntern_["v" + ptrKey(elem) + numKey(n)];
-  if (!t) {
-    t = newType(Type::Vector);
-    t->elem = elem;
-    t->n = n;
-  }
+  const size_t h = typeTable_.mix(typeTable_.mix(2, reinterpret_cast<uintptr_t>(elem)), n);
+  if (Type *t = typeTable_.find(h, [&](const Type *t) { return t->kind == Type::Vector && t->elem == elem && t->n == n; }))
+    return t;
+  Type *t = newType(Type::Vector);
+  t->elem = elem;
+  t->n = n;
+  typeTable_.insert(h, t);
   return t;
 }
 Type *Module::arrayTy(Type *elem, unsigned n) {
-  Type *&t = typeIntern_["a" + ptrKey(elem) + numKey(n)];
-  if (!t) {
-    t = newType(Type::Array);
-    t->elem = elem;
-    t->n = n;
-  }
+  const size_t h = typeTable_.mix(typeTable_.mix(3, reinterpret_cast<uintptr_t>(elem)), n);
+  if (Type *t = typeTable_.find(h, [&](const Type *t) { return t->kind == Type::Array && t->elem == elem && t->n == n; }))
+    return t;
+  Type *t = newType(Type::Array);
+  t->elem = elem;
+  t->n = n;
+  typeTable_.insert(h, t);
   return t;
 }
 Type *Module::fnTy(Type *ret, std::vector<Type *> params, bool vararg) {
@@ -179,8 +182,12 @@ Constant *Module::constInt(Type *t, int64_t v) {
   if (!bits) return constNull(t);
   ConstSlot &slot = constCache_[(uintptr_t(t) >> 4 ^ bits * 0x9E3779B97F4A7C15ull >> 40) & 255];
   if (slot.c && slot.t == t && slot.bits == bits && !slot.fp) return slot.c;
-  Constant *&c = constIntern_["i" + ptrKey(t) + numKey(bits)];
-  if (!c) (c = make<Constant>(t, Constant::Int))->bits = bits;
+  const size_t h = constTable_.mix(constTable_.mix(4, reinterpret_cast<uintptr_t>(t)), bits);
+  Constant *c = constTable_.find(h, [&](const Constant *c) { return c->ck == Constant::Int && c->type == t && c->bits == bits; });
+  if (!c) {
+    (c = make<Constant>(t, Constant::Int))->bits = bits;
+    constTable_.insert(h, c);
+  }
   slot = {t, bits, c, false};
   return c;
 }
@@ -188,8 +195,12 @@ Constant *Module::constFPBits(Type *t, uint64_t bits) {
   if (!bits) return constNull(t);
   ConstSlot &slot = constCache_[(uintptr_t(t) >> 4 ^ bits * 0x9E3779B97F4A7C15ull >> 40) & 255];
   if (slot.c && slot.t == t && slot.bits == bits && slot.fp) return slot.c;
-  Constant *&c = constIntern_["f" + ptrKey(t) + numKey(bits)];
-  if (!c) (c = make<Constant>(t, Constant::FP))->bits = bits;
+  const size_t h = constTable_.mix(constTable_.mix(5, reinterpret_cast<uintptr_t>(t)), bits);
+  Constant *c = constTable_.find(h, [&](const Constant *c) { return c->ck == Constant::FP && c->type == t && c->bits == bits; });
+  if (!c) {
+    (c = make<Constant>(t, Constant::FP))->bits = bits;
+    constTable_.insert(h, c);
+  }
   slot = {t, bits, c, true};
   return c;
 }
@@ -225,12 +236,13 @@ Constant *Module::constAggregate(Type *t, std::vector<Constant *> ops) {
   bool allNull = true;
   for (Constant *o : ops) allNull &= o->ck == Constant::Null;
   if (allNull) return constNull(t); // ConstantAggregateZero
-  std::string k = "A" + ptrKey(t);
-  for (Constant *o : ops) k += ptrKey(o);
-  Constant *&c = constIntern_[k];
+  size_t h = constTable_.mix(6, reinterpret_cast<uintptr_t>(t));
+  for (Constant *o : ops) h = constTable_.mix(h, reinterpret_cast<uintptr_t>(o));
+  Constant *c = constTable_.find(h, [&](const Constant *c) { return c->ck == Constant::Aggregate && c->type == t && c->ops == ops; });
   if (!c) {
     c = make<Constant>(t, Constant::Aggregate);
     c->ops = std::move(ops);
+    constTable_.insert(h, c);
   }
   return c;
 }
