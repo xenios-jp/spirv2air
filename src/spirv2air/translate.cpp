@@ -194,12 +194,12 @@ class Translator {
 
   // ---- arithmetic helpers
   Value* splat(Value* s, unsigned n);
-  Value* perComponent(std::vector<Value*> ops, const std::function<Value*(const std::vector<Value*>&)>& f);
+  template <class F> Value* perComponent(ValueRef ops, F&& f);
   Function* declare(const std::string& name, Type* ret, const std::vector<Type*>& params, AttrClass cls);
-  Value* intrinsic(const std::string& name, Type* ret, const std::vector<Value*>& args, AttrClass cls,
+  Value* intrinsic(const std::string& name, Type* ret, ValueRef args, AttrClass cls,
                    uint8_t fmf = 0);
-  Value* fast(const char* op, std::vector<Value*> args);
-  Function* intrinsicDecl(const std::string& name, Type* ret, const std::vector<Value*>& args, AttrClass cls);
+  Value* fast(const char* op, ValueRef args);
+  Function* intrinsicDecl(const std::string& name, Type* ret, ValueRef args, AttrClass cls);
   static bool countIsNonZeroConst(const Value* v) {
     if (v->vk != Value::Const || v->type->kind != Type::Int) return false;
     const auto* c = static_cast<const Constant*>(v);
@@ -240,9 +240,14 @@ class Translator {
   mtlb::Version airVersion_{2, 6};
   std::vector<Inst> insts_;
   std::vector<uint32_t> uses_;  // how many times each id is used as an operand
-  std::unordered_map<uint32_t, std::pair<Value*, Value*>> mulOps_;  // contractable OpFMul results
-  std::unordered_map<uint32_t, uint32_t> absOf_;                    // FAbs result -> its operand
-  std::unordered_map<uint32_t, std::pair<uint32_t, uint32_t>> absMin_;  // NMin/FMin(FAbs x, FAbs y) -> (x, y)
+  // By result id, sized on first use (an entry is empty while its first member is null / 0, which no operand is).
+  std::vector<std::pair<Value*, Value*>> mulOps_;           // contractable OpFMul results
+  std::vector<uint32_t> absOf_;                             // FAbs result -> its operand
+  std::vector<std::pair<uint32_t, uint32_t>> absMin_;       // NMin/FMin(FAbs x, FAbs y) -> (x, y)
+  template <class V> V& slotFor(std::vector<V>& table, uint32_t id) {
+    if (table.empty()) table.resize(vals_.size());
+    return table[id];
+  }
   size_t functionBegin_ = 0, functionEnd_ = 0;
 
   Module m_;
@@ -1595,7 +1600,7 @@ Pointer Translator::accessChain(const Pointer& base, const uint32_t* idx, unsign
   Pointer r = base;
   uint32_t t = base.type;
   if (base.kind == Pointer::Private) {
-    std::vector<Value*> gidx = {cint(0)};
+    ValueList gidx{cint(0)};
     for (unsigned k = 0; k < n; ++k) {
       const SType& st = type(t);
       if (st.op == spv::OpTypeStruct) {
@@ -1688,12 +1693,14 @@ Value* Translator::splat(Value* s, unsigned n) {
   return b_->shuffleVector(v, m_.constUndef(vt), m_.constAggregate(m_.vecTy(i32_, n), zeros));
 }
 
-Value* Translator::perComponent(std::vector<Value*> ops,
-                                const std::function<Value*(const std::vector<Value*>&)>& f) {
+template <class F> Value* Translator::perComponent(ValueRef ops, F&& f) {
   Type* t = ops[0]->type;
-  if (t->kind != Type::Vector) return f(ops);
+  ValueList s;
+  if (t->kind != Type::Vector) {
+    for (Value* o : ops) s.push_back(o);
+    return f(s);
+  }
   Value* r = nullptr;
-  std::vector<Value*> s;
   for (unsigned c = 0; c < t->n; ++c) {
     s.clear();
     for (Value* o : ops) s.push_back(o->type->kind == Type::Vector ? b_->extractElement(o, cint(c)) : o);
@@ -1746,7 +1753,7 @@ Function* Translator::declare(const std::string& name, Type* ret, const std::vec
   return f;
 }
 
-Function* Translator::intrinsicDecl(const std::string& name, Type* ret, const std::vector<Value*>& args,
+Function* Translator::intrinsicDecl(const std::string& name, Type* ret, ValueRef args,
                                     AttrClass cls) {
   if (auto it = decls_.find(name); it != decls_.end()) return it->second;
   std::vector<Type*> params;
@@ -1754,17 +1761,17 @@ Function* Translator::intrinsicDecl(const std::string& name, Type* ret, const st
   return declare(name, ret, params, cls);
 }
 
-Value* Translator::intrinsic(const std::string& name, Type* ret, const std::vector<Value*>& args, AttrClass cls,
+Value* Translator::intrinsic(const std::string& name, Type* ret, ValueRef args, AttrClass cls,
                              uint8_t fmf) {
   return b_->call(intrinsicDecl(name, ret, args, cls), args, nullptr, "", fmf);
 }
 
-Value* Translator::fast(const char* op, std::vector<Value*> args) {
+Value* Translator::fast(const char* op, ValueRef args) {
   // Compute shaders are compiled as MSL with fast math off (the dump shaders pack exact bit patterns): the precise
   // intrinsics, `air.<op>.f32`, with no fast-math flags.
   // The callee is kept per op (a string literal, compared by address; compute() does not change within a translation),
   // so the name is built and looked up once for each.
-  return perComponent(std::move(args), [&](const std::vector<Value*>& s) {
+  return perComponent(args, [&](const ValueList& s) {
     Function* f = nullptr;
     for (const auto& [name, decl] : fastDecls_)
       if (name == op) f = decl;
@@ -1794,7 +1801,7 @@ Value* Translator::shiftAmount(Value* v) {
 // SPIR-V leaves zero divisors and INT_MIN/-1 open. Use all-ones quotients for zero, the dividend for zero
 // remainders, and INT_MIN and 0 as the quotient and remainder of INT_MIN/-1.
 Value* Translator::integerDivide(Value* x, Value* y, uint16_t op) {
-  return perComponent({x, y}, [&](const std::vector<Value*>& s) {
+  return perComponent({x, y}, [&](const ValueList& s) {
     bool sign = op == spv::OpSDiv || op == spv::OpSRem || op == spv::OpSMod;
     bool rem = op != spv::OpUDiv && op != spv::OpSDiv;
     Value* zero = b_->icmp(I_EQ, s[1], cint(0));
@@ -1818,10 +1825,10 @@ Value* Translator::integerDivide(Value* x, Value* y, uint16_t op) {
 
 Value* Translator::extendedInteger(const Inst& in) {
   Value *x = val(in.operand(2)), *y = val(in.operand(3));
-  Value* lo = perComponent({x, y}, [&](const std::vector<Value*>& s) -> Value* {
+  Value* lo = perComponent({x, y}, [&](const ValueList& s) -> Value* {
     return b_->binop(in.op == spv::OpIAddCarry ? Add : in.op == spv::OpISubBorrow ? Sub : Mul, s[0], s[1]);
   });
-  Value* hi = perComponent({x, y}, [&](const std::vector<Value*>& s) -> Value* {
+  Value* hi = perComponent({x, y}, [&](const ValueList& s) -> Value* {
     if (in.op == spv::OpIAddCarry) return b_->cast(ZExt, b_->icmp(I_ULT, b_->binop(Add, s[0], s[1]), s[0]), i32_);
     if (in.op == spv::OpISubBorrow) return b_->cast(ZExt, b_->icmp(I_ULT, s[0], s[1]), i32_);
     const char* name = in.op == spv::OpSMulExtended ? "air.mul_hi.s.i32" : "air.mul_hi.u.i32";
@@ -1944,6 +1951,7 @@ void Translator::translate(const Inst& in) {
       unsigned na = a->type->n, n = in.wc - 5u;
       if (a->type == b->type) {
         std::vector<Constant*> mask;
+        mask.reserve(n);
         for (unsigned w = 5; w < in.wc; ++w)
           mask.push_back(in.w[w] == 0xFFFFFFFFu ? m_.constUndef(i32_) : m_.constInt(i32_, in.w[w]));
         set(b_->shuffleVector(a, b, m_.constAggregate(m_.vecTy(i32_, n), mask)));
@@ -1977,13 +1985,13 @@ void Translator::translate(const Inst& in) {
       set(extendedInteger(in));
       break;
     case spv::OpFRem:
-      set(perComponent({op(2), op(3)}, [&](const std::vector<Value*>& s) {
+      set(perComponent({op(2), op(3)}, [&](const ValueList& s) {
         return intrinsic("air.fmod.f32", f32_, s, AttrClass::Pure);
       }));
       break;
     case spv::OpFMod: {
       Value* quotient = b_->binop(FDiv, op(2), op(3));
-      Value* floor = perComponent({quotient}, [&](const std::vector<Value*>& s) {
+      Value* floor = perComponent({quotient}, [&](const ValueList& s) {
         return intrinsic("air.floor.f32", f32_, s, AttrClass::Pure);
       });
       set(b_->binop(FSub, op(2), b_->binop(FMul, op(3), floor)));
@@ -1998,12 +2006,11 @@ void Translator::translate(const Inst& in) {
         // SPIRV-Cross's output (single-use temporaries are inlined) gets. Reproduce it for single-use products, in
         // every stage: SPIR-V and D3D12 allow contraction unless the operation is NoContraction (precise).
         auto fused = [&](uint32_t mulId, Value* addend, bool negAddend, bool negProduct) -> Value* {
-          auto it = mulOps_.find(mulId);
-          if (it == mulOps_.end() || uses_[mulId] != 1) return nullptr;
-          Value *ma = it->second.first, *mb = it->second.second;
+          if (mulId >= mulOps_.size() || !mulOps_[mulId].first || uses_[mulId] != 1) return nullptr;
+          Value *ma = mulOps_[mulId].first, *mb = mulOps_[mulId].second;
           if (negProduct) ma = b_->fneg(ma);
           if (negAddend) addend = b_->fneg(addend);
-          return perComponent({ma, mb, addend}, [&](const std::vector<Value*>& s) {
+          return perComponent({ma, mb, addend}, [&](const ValueList& s) {
             return intrinsic("llvm.fmuladd.f32", f32_, s, AttrClass::Pure);
           });
         };
@@ -2014,12 +2021,12 @@ void Translator::translate(const Inst& in) {
             // SPIRV-Cross spells a precise product fma(l, r, 0), which also turns -0 into +0; keep that. air.fma.f32 is
             // what Apple's compiler writes for an MSL fma() (it never emits llvm.fma; -fno-fast-math contracts a*b+c to
             // llvm.fmuladd instead).
-            set(perComponent({x, y}, [&](const std::vector<Value*>& s) {
+            set(perComponent({x, y}, [&](const ValueList& s) {
               return intrinsic("air.fma.f32", f32_, {s[0], s[1], m_.constFPBits(f32_, 0)}, AttrClass::Pure);
             }));
             break;
           }
-          if (!decor_[res()].noContraction) mulOps_[res()] = {x, y};
+          if (!decor_[res()].noContraction) slotFor(mulOps_, res()) = {x, y};
         } else if (!decor_[res()].noContraction) {
           bool sub = in.op == spv::OpFSub;
           Value* r = fused(in.operand(2), y, sub, false);
@@ -2057,18 +2064,18 @@ void Translator::translate(const Inst& in) {
     case spv::OpLogicalNot: set(b_->binop(Xor, op(2), allOnes(rt(), 1))); break;
     case spv::OpLogicalEqual: icmp(I_EQ); break;
     case spv::OpBitReverse:
-      set(perComponent({op(2)}, [&](const std::vector<Value*>& s) {
+      set(perComponent({op(2)}, [&](const ValueList& s) {
         return intrinsic("air.reverse_bits.i32", i32_, s, AttrClass::Pure);
       }));
       break;
     case spv::OpBitCount:
-      set(perComponent({op(2)}, [&](const std::vector<Value*>& s) {
+      set(perComponent({op(2)}, [&](const ValueList& s) {
         return intrinsic("air.popcount.i32", i32_, s, AttrClass::Pure);
       }));
       break;
     case spv::OpBitFieldInsert:
       // Count 0 leaves Base unchanged; skip the guard when Count is a known non-zero constant.
-      set(perComponent({op(2), op(3), op(4), op(5)}, [&](const std::vector<Value*>& s) {
+      set(perComponent({op(2), op(3), op(4), op(5)}, [&](const ValueList& s) {
         Value* r = intrinsic("air.insert_bits.u.i32", i32_, s, AttrClass::Bits);
         return countIsNonZeroConst(s[3]) ? r : b_->select(b_->icmp(I_EQ, s[3], cint(0)), s[0], r);
       }));
@@ -2077,7 +2084,7 @@ void Translator::translate(const Inst& in) {
     case spv::OpBitFieldUExtract: {
       const char* name = in.op == spv::OpBitFieldSExtract ? "air.extract_bits.s.i32" : "air.extract_bits.u.i32";
       // Count 0 yields 0 (air.extract_bits leaves the result unspecified for it).
-      set(perComponent({op(2), op(3), op(4)}, [&](const std::vector<Value*>& s) {
+      set(perComponent({op(2), op(3), op(4)}, [&](const ValueList& s) {
         Value* r = intrinsic(name, i32_, s, AttrClass::Bits);
         return countIsNonZeroConst(s[2]) ? r : b_->select(b_->icmp(I_EQ, s[2], cint(0)), cint(0), r);
       }));
@@ -2092,7 +2099,7 @@ void Translator::translate(const Inst& in) {
         // Direct3D's ftoi and ftou), in every stage. fptoui/fptosi would be poison out of range, and guest shaders
         // convert values they do not control the range of (a vertex index register, for one).
         bool sign = in.op == spv::OpConvertFToS;
-        set(perComponent({op(2)}, [&](const std::vector<Value*>& s) {
+        set(perComponent({op(2)}, [&](const ValueList& s) {
           return intrinsic(sign ? "air.convert.s.i32.f.f32" : "air.convert.u.i32.f.f32", i32_, s, AttrClass::Pure);
         }));
       } else {
@@ -2100,7 +2107,7 @@ void Translator::translate(const Inst& in) {
       }
       break;
     case spv::OpQuantizeToF16:
-      set(perComponent({op(2)}, [&](const std::vector<Value*>& s) -> Value* {
+      set(perComponent({op(2)}, [&](const ValueList& s) -> Value* {
         Value* rounded = b_->cast(FPExt, b_->cast(FPTrunc, s[0], f16_), f32_);
         Value* raw = b_->cast(BitCast, rounded, i32_);
         Value* magnitude = b_->binop(And, raw, cint(0x7FFFFFFF));
@@ -2129,10 +2136,11 @@ void Translator::translate(const Inst& in) {
     case spv::OpFOrdEqual:
       // Xenia's zero-multiply guard, NMin(|x|, |y|) == 0, is x == 0 || y == 0 (NMin returns the other operand when
       // one is NaN; FMin leaves that case undefined), and that compiles to less code than the minimum and its test.
-      if (auto it = absMin_.find(in.operand(2));
-          it != absMin_.end() && isConstant(in.operand(3)) && isFloatZero(consts_[in.operand(3)])) {
+      if (in.operand(2) < absMin_.size() && absMin_[in.operand(2)].first && isConstant(in.operand(3)) &&
+          isFloatZero(consts_[in.operand(3)])) {
         Value* zero = op(3);
-        set(b_->binop(Or, b_->fcmp(F_OEQ, val(it->second.first), zero), b_->fcmp(F_OEQ, val(it->second.second), zero)));
+        const auto& pair = absMin_[in.operand(2)];
+        set(b_->binop(Or, b_->fcmp(F_OEQ, val(pair.first), zero), b_->fcmp(F_OEQ, val(pair.second), zero)));
         break;
       }
       fcmp(F_OEQ);
@@ -2149,7 +2157,7 @@ void Translator::translate(const Inst& in) {
     case spv::OpFUnordGreaterThanEqual: fcmp(F_UGE); break;
     case spv::OpFUnordEqual: fcmp(F_UEQ); break;
     case spv::OpIsInf:
-      set(perComponent({op(2)}, [&](const std::vector<Value*>& s) {
+      set(perComponent({op(2)}, [&](const ValueList& s) {
         Value* magnitude = b_->binop(And, b_->cast(BitCast, s[0], i32_), cint(0x7FFFFFFF));
         return b_->icmp(I_EQ, magnitude, cint(0x7F800000));
       }));
@@ -2163,7 +2171,7 @@ void Translator::translate(const Inst& in) {
     case spv::OpDPdx: case spv::OpDPdxCoarse: case spv::OpDPdxFine:
     case spv::OpDPdy: case spv::OpDPdyCoarse: case spv::OpDPdyFine: {
       bool x = in.op == spv::OpDPdx || in.op == spv::OpDPdxCoarse || in.op == spv::OpDPdxFine;
-      set(perComponent({op(2)}, [&](const std::vector<Value*>& s) {
+      set(perComponent({op(2)}, [&](const ValueList& s) {
         return intrinsic(x ? "air.dfdx.f32" : "air.dfdy.f32", f32_, s, AttrClass::Derivative);
       }));
       break;
@@ -2178,10 +2186,10 @@ void Translator::translate(const Inst& in) {
     case spv::OpExtInst:
       if (in.operand(2) != glslExt_) fail("extended instruction set");
       set(extInst(in));
-      if (in.w[4] == GLSLstd450FAbs) absOf_[res()] = in.w[5];
+      if (in.w[4] == GLSLstd450FAbs) slotFor(absOf_, res()) = in.w[5];
       if (in.w[4] == GLSLstd450NMin || in.w[4] == GLSLstd450FMin) {
-        auto x = absOf_.find(in.w[5]), y = absOf_.find(in.w[6]);
-        if (x != absOf_.end() && y != absOf_.end()) absMin_[res()] = {x->second, y->second};
+        const uint32_t x = in.w[5] < absOf_.size() ? absOf_[in.w[5]] : 0, y = in.w[6] < absOf_.size() ? absOf_[in.w[6]] : 0;
+        if (x && y) slotFor(absMin_, res()) = {x, y};
       }
       break;
     case spv::OpSampledImage: {
@@ -2338,22 +2346,22 @@ Value* Translator::extInst(const Inst& in) {
     return true;
   };
   auto ints = [&](const char* name, std::vector<Value*> ops) {
-    return perComponent(std::move(ops), [&](const std::vector<Value*>& s) {
+    return perComponent(std::move(ops), [&](const ValueList& s) {
       return intrinsic(name, i32_, s, AttrClass::Pure);
     });
   };
   switch (in.w[4]) {
     case GLSLstd450SAbs:
-      return perComponent({a(0)}, [&](const std::vector<Value*>& s) {
+      return perComponent({a(0)}, [&](const ValueList& s) {
         return b_->select(b_->icmp(I_SLT, s[0], cint(0)), b_->binop(Sub, cint(0), s[0]), s[0]);
       });
     case GLSLstd450SSign:
-      return perComponent({a(0)}, [&](const std::vector<Value*>& s) {
+      return perComponent({a(0)}, [&](const ValueList& s) {
         Value* positive = b_->cast(ZExt, b_->icmp(I_SGT, s[0], cint(0)), i32_);
         return b_->select(b_->icmp(I_SLT, s[0], cint(0)), cint(-1), positive);
       });
     case GLSLstd450FSign:
-      return perComponent({a(0)}, [&](const std::vector<Value*>& s) {
+      return perComponent({a(0)}, [&](const ValueList& s) {
         Value* raw = b_->cast(BitCast, s[0], i32_);
         Value* magnitude = b_->binop(And, raw, cint(0x7FFFFFFF));
         Value* active =
@@ -2362,7 +2370,7 @@ Value* Translator::extInst(const Inst& in) {
         return b_->select(active, sign, m_.constFloat(0));
       });
     case GLSLstd450Fma:
-      return perComponent({a(0), a(1), a(2)}, [&](const std::vector<Value*>& s) {
+      return perComponent({a(0), a(1), a(2)}, [&](const ValueList& s) {
         return intrinsic("air.fma.f32", f32_, s, AttrClass::Pure);
       });
     case GLSLstd450Exp:
@@ -2424,7 +2432,7 @@ Value* Translator::extInst(const Inst& in) {
     case GLSLstd450SClamp: return ints("air.min.s.i32", {ints("air.max.s.i32", {a(0), a(1)}), a(2)});
     case GLSLstd450Ldexp:
       // Mesa's lowering: clamp the exponent to +-254 and apply it as two exact powers of two.
-      return perComponent({a(0), a(1)}, [&](const std::vector<Value*>& s) {
+      return perComponent({a(0), a(1)}, [&](const ValueList& s) {
         Value* e = intrinsic("air.min.s.i32", i32_,
                              {intrinsic("air.max.s.i32", i32_, {s[1], cint(-254)}, AttrClass::Pure), cint(254)},
                              AttrClass::Pure);
@@ -2486,7 +2494,7 @@ Value* Translator::extInst(const Inst& in) {
     case GLSLstd450FindSMsb:
       return findMsb(a(0), true);
     case GLSLstd450FindILsb:
-      return perComponent({a(0)}, [&](const std::vector<Value*>& s) {
+      return perComponent({a(0)}, [&](const ValueList& s) {
         Value* ctz = intrinsic("air.ctz.i32", i32_, {s[0], m_.constInt(i1_, 0)}, AttrClass::Pure);
         return b_->select(b_->icmp(I_EQ, s[0], cint(0)), cint(-1), ctz);
       });
@@ -2518,11 +2526,11 @@ Value* Translator::extInst(const Inst& in) {
       return fast("atanh", {a(0)});
     case GLSLstd450Radians:
       // x * (pi / 180) with the constant rounded to float, as MSL's x * (M_PI_F / 180.0f) compiles.
-      return perComponent({a(0)}, [&](const std::vector<Value*>& s) {
+      return perComponent({a(0)}, [&](const ValueList& s) {
         return b_->binop(FMul, s[0], m_.constFPBits(f32_, 0x3C8EFA35));
       });
     case GLSLstd450Degrees:
-      return perComponent({a(0)}, [&](const std::vector<Value*>& s) {
+      return perComponent({a(0)}, [&](const ValueList& s) {
         return b_->binop(FMul, s[0], m_.constFPBits(f32_, 0x42652EE0));
       });
     case GLSLstd450FMix:
@@ -2542,15 +2550,15 @@ Value* Translator::extInst(const Inst& in) {
       if (in.w[4] == GLSLstd450FMix)
         // MSL mix(x, y, a); SPIR-V defines x * (1 - a) + y * a, which air.mix computes for finite operands.
         return perComponent(
-            ops, [&](const std::vector<Value*>& s) { return intrinsic("air.mix.f32", f32_, s, AttrClass::Pure); });
+            ops, [&](const ValueList& s) { return intrinsic("air.mix.f32", f32_, s, AttrClass::Pure); });
       if (in.w[4] == GLSLstd450Step)
         // SPIR-V: 0 if x < edge, otherwise 1, so a NaN operand gives 1 (unordered >=). MSL step() compiles to an
         // ordered x >= edge and gives 0 there.
-        return perComponent(ops, [&](const std::vector<Value*>& s) {
+        return perComponent(ops, [&](const ValueList& s) {
           return intrinsic("air.convert.f.f32.u.i1", f32_, {b_->fcmp(F_UGE, s[1], s[0])}, AttrClass::Pure);
         });
       // clamp((x - e0) / (e1 - e0), 0, 1), then t * t * (3 - 2 * t); the multiply-add contracts in compute only.
-      return perComponent(ops, [&](const std::vector<Value*>& s) {
+      return perComponent(ops, [&](const ValueList& s) {
         Value* num = b_->binop(FSub, s[2], s[0]);
         Value* den = b_->binop(FSub, s[1], s[0]);
         // Fast math (graphics) turns the division into a multiply by the reciprocal.
@@ -2761,7 +2769,7 @@ Value* Translator::geometric(const Inst& in) {
 
 Value* Translator::packNormalized(const char* name, Value* x) {
   // Normalized packing leaves NaNs unspecified; use the D3D conversion choice of zero.
-  Value* value = perComponent({x}, [&](const std::vector<Value*>& s) {
+  Value* value = perComponent({x}, [&](const ValueList& s) {
     return b_->select(b_->fcmp(F_UNO, s[0], s[0]), m_.constFloat(0), s[0]);
   });
   return intrinsic(name, i32_, {value}, AttrClass::Pure);
@@ -2772,7 +2780,7 @@ Value* Translator::packNormalized(const char* name, Value* x) {
 Value* Translator::splitFloat(const Inst& in, bool frexp) {
   Value* x = val(in.w[5]);
   auto part = [&](bool second) {
-    return perComponent({x}, [&](const std::vector<Value*>& s) -> Value* {
+    return perComponent({x}, [&](const ValueList& s) -> Value* {
       Value* raw = b_->cast(BitCast, s[0], i32_);
       Value* magnitude = b_->binop(And, raw, cint(0x7FFFFFFF));
       if (!frexp) {
@@ -2814,7 +2822,7 @@ Value* Translator::splitFloat(const Inst& in, bool frexp) {
 // FindUMsb / FindSMsb: the index of the most significant set bit, or of the most significant bit differing from
 // the sign for a negative signed value (so FindSMsb(-1) is -1 as well).
 Value* Translator::findMsb(Value* x, bool sign) {
-  return perComponent({x}, [&](const std::vector<Value*>& s) {
+  return perComponent({x}, [&](const ValueList& s) {
     Value* v = s[0];
     if (sign) v = b_->binop(Xor, b_->binop(AShr, v, cint(31)), v);
     Value* clz = intrinsic("air.clz.i32", i32_, {v, m_.constInt(i1_, 0)}, AttrClass::Pure);

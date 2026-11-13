@@ -247,7 +247,7 @@ Constant *Module::constAggregate(Type *t, std::vector<Constant *> ops) {
   return c;
 }
 
-static Type *indexedType(Type *t, const std::vector<Value *> &idx, size_t from);
+static Type *indexedType(Type *t, ValueRef idx, size_t from);
 
 Constant *Module::constCast(CastOpc opc, Constant *v, Type *to) {
   Constant *&c = constIntern_["Ec" + numKey(opc) + ptrKey(v) + ptrKey(to)];
@@ -392,7 +392,7 @@ Metadata *Module::mdDistinct(std::vector<Metadata *> ops) {
 }
 
 // ================================================================ builder
-static Type *indexedType(Type *t, const std::vector<Value *> &idx, size_t from) {
+static Type *indexedType(Type *t, ValueRef idx, size_t from) {
   for (size_t i = from; i < idx.size(); ++i) {
     if (t->kind == Type::Struct) {
       auto *c = static_cast<Constant *>(idx[i]);
@@ -405,7 +405,7 @@ static Type *indexedType(Type *t, const std::vector<Value *> &idx, size_t from) 
   return t;
 }
 
-Instruction *Builder::gep(Type *src, Value *ptr, std::vector<Value *> idx, bool inbounds, const std::string &name) {
+Instruction *Builder::gep(Type *src, Value *ptr, ValueRef idx, bool inbounds, const std::string &name) {
   Type *res = m_.ptrTy(indexedType(src, idx, 1), ptr->type->n);
   Instruction *i = m_.newInst(Op::GEP, res);
   i->srcElemTy = src;
@@ -519,7 +519,7 @@ Instruction *Builder::phi(Type *t, std::vector<std::pair<Value *, BasicBlock *>>
   }
   return add(i, name);
 }
-Instruction *Builder::call(Function *callee, const std::vector<Value *> &args, const AttrList *attrs,
+Instruction *Builder::call(Function *callee, ValueRef args, const AttrList *attrs,
                            const std::string &name, uint8_t fmf) {
   Instruction *i = m_.newInst(Op::Call, callee->fty->elem);
   i->srcElemTy = callee->fty;

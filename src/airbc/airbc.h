@@ -432,12 +432,30 @@ private:
 };
 
 // ---------------------------------------------------------------- builder
+// A borrowed run of values: a braced list, a std::vector or a SmallVec, passed without first being copied into a
+// std::vector. It must not outlive the expression that made it.
+class ValueRef {
+public:
+  ValueRef(std::initializer_list<Value *> l) : first_(l.begin()), last_(l.end()) {}
+  ValueRef(const std::vector<Value *> &v) : first_(v.data()), last_(v.data() + v.size()) {}
+  template <unsigned N> ValueRef(const SmallVec<Value *, N> &v) : first_(v.begin()), last_(v.end()) {}
+  Value *const *begin() const { return first_; }
+  Value *const *end() const { return last_; }
+  size_t size() const { return size_t(last_ - first_); }
+  Value *operator[](size_t k) const { return first_[k]; }
+
+private:
+  Value *const *first_;
+  Value *const *last_;
+};
+using ValueList = SmallVec<Value *, 4>;
+
 class Builder {
 public:
   Builder(Module &m, BasicBlock *bb) : m_(m), bb_(bb) {}
   void setInsertBlock(BasicBlock *bb) { bb_ = bb; }
 
-  Instruction *gep(Type *srcElemTy, Value *ptr, std::vector<Value *> idx, bool inbounds, const std::string &name = "");
+  Instruction *gep(Type *srcElemTy, Value *ptr, ValueRef idx, bool inbounds, const std::string &name = "");
   Instruction *load(Type *t, Value *ptr, uint32_t align, const std::string &name = "", bool isVolatile = false);
   Instruction *store(Value *val, Value *ptr, uint32_t align, bool isVolatile = false);
   Instruction *extractValue(Value *agg, std::vector<uint32_t> idx, const std::string &name = "");
@@ -460,7 +478,7 @@ public:
     sw->ops.push_back(val);
     sw->bbs.push_back(dest);
   }
-  Instruction *call(Function *callee, const std::vector<Value *> &args, const AttrList *attrs = nullptr,
+  Instruction *call(Function *callee, ValueRef args, const AttrList *attrs = nullptr,
                     const std::string &name = "", uint8_t fmf = 0);
   Instruction *br(BasicBlock *dest);
   Instruction *condBr(Value *c, BasicBlock *t, BasicBlock *f);
