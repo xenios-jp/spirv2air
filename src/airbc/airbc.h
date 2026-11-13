@@ -70,14 +70,16 @@ public:
   SmallVec(std::initializer_list<T> l) { assign(l.begin(), l.end()); }
   SmallVec(const SmallVec &o) { assign(o.begin(), o.end()); }
   SmallVec(SmallVec &&o) noexcept { steal(o); }
-  ~SmallVec() { std::free(heap_); }
+  ~SmallVec() {
+    if (heap_) std::free(heap_);  // nearly every vector stays inline: skip the call into free
+  }
   SmallVec &operator=(const SmallVec &o) {
     if (this != &o) assign(o.begin(), o.end());
     return *this;
   }
   SmallVec &operator=(SmallVec &&o) noexcept {
     if (this != &o) {
-      std::free(heap_);
+      if (heap_) std::free(heap_);
       steal(o);
     }
     return *this;
@@ -152,7 +154,7 @@ private:
     size_t cap = cap_ * 2 > n ? cap_ * 2 : n;
     T *h = static_cast<T *>(std::malloc(cap * sizeof(T)));
     std::memcpy(h, data(), size_ * sizeof(T));
-    std::free(heap_);
+    if (heap_) std::free(heap_);
     heap_ = h;
     cap_ = uint32_t(cap);
   }
