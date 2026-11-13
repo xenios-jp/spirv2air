@@ -54,15 +54,27 @@ size_t edgesTo(const BasicBlock* from, const BasicBlock* to) {
 // Dominators (Cooper, Harvey, Kennedy) and dominance frontiers of the blocks reachable from the entry. Blocks are
 // numbered in layout order; edges are kept per terminator operand.
 struct Cfg {
+  // For the verifier: the blocks are found through a map.
   explicit Cfg(const Function* f) : blocks(f->blocks) {
+    index.reserve(blocks.size());
+    for (size_t b = 0; b < blocks.size(); ++b) index[blocks[b]] = int(b);
+    build();
+  }
+  // The blocks are numbered with tags (tag - base), which the caller must not overwrite while it uses the Cfg.
+  Cfg(Module& m, const Function* f) : blocks(f->blocks), tagged(true) {
+    base = m.allocTags(unsigned(blocks.size()));
+    for (size_t b = 0; b < blocks.size(); ++b) blocks[b]->tag = base + uint32_t(b);
+    build();
+  }
+  int indexOf(const BasicBlock* b) const { return tagged ? int(b->tag - base) : index.at(b); }
+
+  void build() {
     const size_t n = blocks.size();
-    index.reserve(n);
-    for (size_t b = 0; b < n; ++b) index[blocks[b]] = int(b);
     succ.resize(n);
     pred.resize(n);
     for (size_t b = 0; b < n; ++b)
       for (const BasicBlock* s : successors(blocks[b])) {
-        int j = index.at(s);
+        int j = indexOf(s);
         succ[b].push_back(j);
         pred[j].push_back(int(b));
       }
@@ -141,7 +153,9 @@ struct Cfg {
   }
 
   std::vector<BasicBlock*> blocks;
-  std::unordered_map<const BasicBlock*, int> index;
+  bool tagged = false;
+  uint32_t base = 0;
+  std::unordered_map<const BasicBlock*, int> index;  // only without tags
   std::vector<std::vector<int>> succ, pred, children;
   std::vector<int> po, rpo, idom, tin, tout;
 };
@@ -165,10 +179,18 @@ class Threader {
   }
 
  private:
-  using Preds = std::unordered_map<const BasicBlock*, std::vector<BasicBlock*>>;
+  // The predecessors of each block, one per edge, in layout order. The blocks are numbered with tags (tag - base).
+  struct Preds {
+    uint32_t base = 0;
+    std::vector<std::vector<BasicBlock*>> of;
+    std::vector<BasicBlock*>& operator[](const BasicBlock* b) { return of[b->tag - base]; }
+  };
 
   Preds predecessors() const {
     Preds preds;
+    preds.base = m_.allocTags(unsigned(f_->blocks.size()));
+    preds.of.resize(f_->blocks.size());
+    for (size_t k = 0; k < f_->blocks.size(); ++k) f_->blocks[k]->tag = preds.base + uint32_t(k);
     for (BasicBlock* b : f_->blocks)
       for (const BasicBlock* s : successors(b)) preds[s].push_back(b);
     return preds;
@@ -201,7 +223,6 @@ class Threader {
   bool dissolveLatches(BasicBlock* h) {
     Preds preds = predecessors();
     // Candidates: a predecessor made of phis and `br h`, with the predecessors of its own.
-    std::unordered_map<const Value*, const BasicBlock*> phiHome;
     std::vector<BasicBlock*> latches;
     for (BasicBlock* c : preds[h]) {
       if (c == h || c->insts.empty() || preds[c].empty() || edgesTo(c, h) != 1) continue;
@@ -212,9 +233,26 @@ class Threader {
       for (const BasicBlock* b : preds[c]) ok &= b != h && b != c && edgesTo(b, c) == 1 && edgesTo(b, h) == 0;
       if (!ok) continue;
       latches.push_back(c);
-      for (size_t k = 0; k + 1 < c->insts.size(); ++k) phiHome[c->insts[k]] = c;
     }
     if (latches.empty()) return false;
+    // The latches' phis are numbered with tags (tag - phiBase), and phiOwner[k] is the latch of phi k.
+    unsigned nphis = 0;
+    for (const BasicBlock* c : latches) nphis += unsigned(c->insts.size()) - 1;
+    const uint32_t phiBase = m_.allocTags(nphis);
+    std::vector<const Instruction*> phiList;
+    std::vector<const BasicBlock*> phiOwner;
+    phiList.reserve(nphis), phiOwner.reserve(nphis);
+    for (const BasicBlock* c : latches)
+      for (size_t k = 0; k + 1 < c->insts.size(); ++k) {
+        c->insts[k]->tag = phiBase + unsigned(phiList.size());
+        phiList.push_back(c->insts[k]);
+        phiOwner.push_back(c);
+      }
+    // The latch a value is a phi of, or null.
+    auto phiHome = [&](const Value* v) -> const BasicBlock* {
+      const unsigned k = v->tag - phiBase;
+      return v->vk == Value::Inst && k < nphis && phiList[k] == v ? phiOwner[k] : nullptr;
+    };
     // The latch's phis may be read only by h's phis, through the entry for the latch.
     std::unordered_set<const BasicBlock*> bad;
     std::unordered_set<const BasicBlock*> latchSet(latches.begin(), latches.end());
@@ -222,13 +260,14 @@ class Threader {
       for (const BasicBlock* b : preds[c]) {
         if (latchSet.count(b)) bad.insert(c);
       }
-    for (const BasicBlock* b : f_->blocks)
-      for (const Instruction* i : b->insts)
-        for (size_t k = 0; k < i->ops.size(); ++k) {
-          auto it = phiHome.find(i->ops[k]);
-          if (it == phiHome.end()) continue;
-          if (!(b == h && i->op == Op::Phi && i->bbs[k] == it->second)) bad.insert(it->second);
-        }
+    if (nphis)
+      for (const BasicBlock* b : f_->blocks)
+        for (const Instruction* i : b->insts)
+          for (size_t k = 0; k < i->ops.size(); ++k) {
+            const BasicBlock* home = phiHome(i->ops[k]);
+            if (!home) continue;
+            if (!(b == h && i->op == Op::Phi && i->bbs[k] == home)) bad.insert(home);
+          }
     std::unordered_set<const BasicBlock*> removed;
     for (BasicBlock* c : latches) {
       if (bad.count(c)) continue;
@@ -239,10 +278,10 @@ class Threader {
         if (!entryFor(phi, c, at)) continue;
         Value* x = phi->ops[at];
         eraseEntry(phi, at);
-        auto home = phiHome.find(x);
+        const BasicBlock* home = phiHome(x);
         for (BasicBlock* b : ps) {
           Value* v = x;
-          if (home != phiHome.end() && home->second == c) {
+          if (home == c) {
             size_t k;
             entryFor(static_cast<const Instruction*>(x), b, k);
             v = static_cast<const Instruction*>(x)->ops[k];
@@ -277,13 +316,19 @@ class Threader {
     Preds preds = predecessors();
     Instruction* sw = h->insts.back();
     std::vector<Instruction*> hp;
-    std::unordered_map<const Value*, size_t> hidx;
     for (Instruction* i : h->insts) {
       if (i->op != Op::Phi) break;
-      hidx[i] = hp.size();
       hp.push_back(i);
     }
     const size_t nv = hp.size();
+    // h's phis are numbered with tags (tag - hBase); hIndex is a value's number, or npos.
+    const uint32_t hBase = m_.allocTags(unsigned(nv));
+    for (size_t v = 0; v < nv; ++v) hp[v]->tag = hBase + uint32_t(v);
+    constexpr size_t npos = ~size_t(0);
+    auto hIndex = [&](const Value* v) -> size_t {
+      const size_t k = v->tag - hBase;
+      return v->vk == Value::Inst && k < nv && hp[k] == v ? k : npos;
+    };
     Instruction* pcPhi = static_cast<Instruction*>(sw->ops[0]);
     auto destOf = [&](uint64_t c) {
       for (size_t k = 1; k < sw->bbs.size(); ++k) {
@@ -349,8 +394,8 @@ class Threader {
           size_t at;
           entryFor(phi, h, at);
           Value* x = phi->ops[at];
-          auto it = hidx.find(x);
-          phi->ops.push_back(it == hidx.end() ? x : t.ev[it->second]);
+          const size_t xi = hIndex(x);
+          phi->ops.push_back(xi == npos ? x : t.ev[xi]);
           phi->bbs.push_back(t.p);
         }
         edgeThread[t.p][d] = ti;
@@ -374,14 +419,14 @@ class Threader {
     }
 
     // Rebuild SSA form on the new CFG.
-    Cfg cfg(f_);
-    const int hb = cfg.index.at(h);
+    Cfg cfg(m_, f_);
+    const int hb = cfg.indexOf(h);
     std::vector<char> hasPhi(cfg.blocks.size(), 0);
     {
       std::vector<std::vector<int>> frontier = cfg.frontiers();
       std::vector<int> work;
       for (const BasicBlock* d : targets) {
-        int b = cfg.index.at(d);
+        int b = cfg.indexOf(d);
         hasPhi[b] = 1;
         work.push_back(b);
       }
@@ -443,8 +488,8 @@ class Threader {
       for (Instruction* i : blk->insts) {
         if (i->op == Op::Phi) continue;
         for (Value*& op : i->ops) {
-          auto it = hidx.find(op);
-          if (it != hidx.end() && cur[it->second]) op = cur[it->second];
+          const size_t oi = hIndex(op);
+          if (oi != npos && cur[oi]) op = cur[oi];
         }
       }
       // The entries of the successors' phis for this block read the values at its end.
@@ -455,8 +500,8 @@ class Threader {
           if (phi->op != Op::Phi) break;
           for (size_t k = 0; k < phi->ops.size(); ++k) {
             if (phi->bbs[k] != blk) continue;
-            auto it = hidx.find(phi->ops[k]);
-            if (it != hidx.end() && cur[it->second]) phi->ops[k] = cur[it->second];
+            const size_t oi = hIndex(phi->ops[k]);
+            if (oi != npos && cur[oi]) phi->ops[k] = cur[oi];
           }
         }
       }
@@ -507,7 +552,7 @@ std::string verifyDominance(const Function* f) {
         int use = int(b);
         size_t at = k;
         if (i->op == Op::Phi) {
-          use = cfg.index.at(i->bbs[o]);
+          use = cfg.indexOf(i->bbs[o]);
           if (!cfg.reachable(use)) continue;
           at = ~size_t(0);
         }
