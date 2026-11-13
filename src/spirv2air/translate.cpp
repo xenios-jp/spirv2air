@@ -199,6 +199,7 @@ class Translator {
   Value* intrinsic(const std::string& name, Type* ret, const std::vector<Value*>& args, AttrClass cls,
                    uint8_t fmf = 0);
   Value* fast(const char* op, std::vector<Value*> args);
+  Function* intrinsicDecl(const std::string& name, Type* ret, const std::vector<Value*>& args, AttrClass cls);
   static bool countIsNonZeroConst(const Value* v) {
     if (v->vk != Value::Const || v->type->kind != Type::Int) return false;
     const auto* c = static_cast<const Constant*>(v);
@@ -268,6 +269,7 @@ class Translator {
   std::vector<bool> labels_;         // per id: defined by an OpLabel
   std::vector<std::pair<Instruction*, Inst>> phis_;
   std::unordered_map<std::string, Function*> decls_;
+  std::vector<std::pair<const char*, Function*>> fastDecls_;  // fast()'s callee per op literal
   const AttrList* classAttrs_[8] = {};  // declare()'s attribute list per AttrClass, built on first use
   std::map<uint32_t, std::pair<Value*, Value*>> sampledImages_;  // id -> (texture, sampler)
   std::map<uint32_t, uint32_t> sampledImageType_;                 // id -> SPIR-V image type
@@ -1744,28 +1746,33 @@ Function* Translator::declare(const std::string& name, Type* ret, const std::vec
   return f;
 }
 
+Function* Translator::intrinsicDecl(const std::string& name, Type* ret, const std::vector<Value*>& args,
+                                    AttrClass cls) {
+  if (auto it = decls_.find(name); it != decls_.end()) return it->second;
+  std::vector<Type*> params;
+  for (Value* v : args) params.push_back(v->type);
+  return declare(name, ret, params, cls);
+}
+
 Value* Translator::intrinsic(const std::string& name, Type* ret, const std::vector<Value*>& args, AttrClass cls,
                              uint8_t fmf) {
-  Function* f;
-  if (auto it = decls_.find(name); it != decls_.end()) {
-    f = it->second;
-  } else {
-    std::vector<Type*> params;
-    for (Value* v : args) params.push_back(v->type);
-    f = declare(name, ret, params, cls);
-  }
-  return b_->call(f, args, nullptr, "", fmf);
+  return b_->call(intrinsicDecl(name, ret, args, cls), args, nullptr, "", fmf);
 }
 
 Value* Translator::fast(const char* op, std::vector<Value*> args) {
   // Compute shaders are compiled as MSL with fast math off (the dump shaders pack exact bit patterns): the precise
   // intrinsics, `air.<op>.f32`, with no fast-math flags.
-  if (compute())
-    return perComponent(std::move(args), [&](const std::vector<Value*>& s) {
-      return intrinsic(std::string("air.") + op + ".f32", f32_, s, AttrClass::Pure);
-    });
+  // The callee is kept per op (a string literal, compared by address; compute() does not change within a translation),
+  // so the name is built and looked up once for each.
   return perComponent(std::move(args), [&](const std::vector<Value*>& s) {
-    return intrinsic(std::string("air.fast_") + op + ".f32", f32_, s, AttrClass::Pure);
+    Function* f = nullptr;
+    for (const auto& [name, decl] : fastDecls_)
+      if (name == op) f = decl;
+    if (!f) {
+      f = intrinsicDecl(std::string(compute() ? "air." : "air.fast_") + op + ".f32", f32_, s, AttrClass::Pure);
+      fastDecls_.push_back({op, f});
+    }
+    return b_->call(f, s, nullptr, "", 0);
   });
 }
 
