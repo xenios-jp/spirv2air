@@ -4,6 +4,7 @@
 // the writer mirrors LLVM 13's ValueEnumerator + ModuleBitcodeWriter so that a module built in the same order
 // as `metal-as` parses it serializes to the same bytes.
 #pragma once
+#include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -11,6 +12,7 @@
 #include <initializer_list>
 #include <map>
 #include <memory>
+#include <new>
 #include <string>
 #include <type_traits>
 #include <unordered_map>
@@ -283,6 +285,71 @@ struct NamedMD {
   std::vector<Metadata *> ops;
 };
 
+// ---------------------------------------------------------------- arena
+// Bump allocator behind a Module's IR objects (types, constants, instructions, blocks, metadata, attribute sets).
+// Nothing is freed one by one: the module's objects live as long as it does. Its blocks come from a per-thread free list
+// and go back to it when the module is destroyed, so a thread that converts many modules keeps reusing memory it has
+// already touched (no page faults after the first) rather than asking the system allocator for it again. The list keeps at
+// most kKeptBytesPerThread; blocks beyond that are freed when the module goes. Nothing handed out by the arena may be used
+// after its module is gone.
+class Arena {
+public:
+  static constexpr size_t kBlockBytes = 64 << 10;
+  static constexpr size_t kKeptBytesPerThread = 4 << 20;
+  Arena() = default;
+  Arena(const Arena &) = delete;
+  Arena &operator=(const Arena &) = delete;
+  ~Arena();
+  // Memory aligned to 16 bytes, valid until the arena is destroyed.
+  void *alloc(size_t bytes);
+  // A T constructed in the arena; its destructor runs when the arena is destroyed (later objects first).
+  template <class T, class... A> T *make(A &&...a) {
+    if (std::is_trivially_destructible<T>::value) return new (alloc(sizeof(T))) T(std::forward<A>(a)...);
+    Finalizer *f = static_cast<Finalizer *>(alloc(sizeof(Finalizer) + sizeof(T)));
+    T *t = new (f + 1) T(std::forward<A>(a)...);
+    f->object = t;
+    f->destroy = [](void *p) { static_cast<T *>(p)->~T(); };
+    f->next = finalizers_;
+    finalizers_ = f;
+    return t;
+  }
+  // Bytes handed out so far, and bytes held in blocks.
+  size_t used() const { return used_; }
+  size_t reserved() const { return reserved_; }
+
+private:
+  struct Block {
+    Block *next;
+    size_t bytes; // of the whole allocation, header included
+  };
+  struct Finalizer {
+    Finalizer *next;
+    void *object;
+    void (*destroy)(void *);
+    void *pad; // keeps the object 16-byte aligned
+  };
+  static_assert(sizeof(Block) == 16 && sizeof(Finalizer) == 32, "arena headers keep 16-byte alignment");
+  void *allocSlow(size_t bytes);
+  Block *blocks_ = nullptr; // blocks of kBlockBytes, newest first
+  Block *large_ = nullptr;  // blocks bigger than a quarter block, freed with the arena
+  char *cur_ = nullptr, *end_ = nullptr;
+  Finalizer *finalizers_ = nullptr;
+  size_t used_ = 0, reserved_ = 0;
+};
+
+// Standard allocator over an Arena, for containers a Module owns (deallocate is a no-op).
+template <class T> struct ArenaAllocator {
+  using value_type = T;
+  Arena *arena;
+  explicit ArenaAllocator(Arena *a) : arena(a) {}
+  template <class U> ArenaAllocator(const ArenaAllocator<U> &o) : arena(o.arena) {}
+  T *allocate(size_t n) { return static_cast<T *>(arena->alloc(n * sizeof(T))); }
+  void deallocate(T *, size_t) {}
+  template <class U> bool operator==(const ArenaAllocator<U> &o) const { return arena == o.arena; }
+  template <class U> bool operator!=(const ArenaAllocator<U> &o) const { return arena != o.arena; }
+};
+static_assert(alignof(std::max_align_t) <= 16, "the arena aligns to 16 bytes");
+
 // ---------------------------------------------------------------- module
 // Interned objects in an open-addressing table (linear probing, never shrinks). The caller supplies the hash and the test
 // that a candidate is the object it wants, so a lookup builds no key; nothing is ever removed.
@@ -401,19 +468,11 @@ public:
 
 private:
   uint32_t nextTag_ = 1;
-  template <class T, class... A> T *make(A &&...a) {
-    auto p = std::make_unique<T>(std::forward<A>(a)...);
-    T *r = p.get();
-    owned_.push_back(std::move(p));
-    return r;
-  }
+  template <class T, class... A> T *make(A &&...a) { return arena_.make<T>(std::forward<A>(a)...); }
   Type *newType(Type::Kind k);
-  std::vector<std::unique_ptr<Type>> types_;
-  std::vector<std::unique_ptr<Value>> owned_;
-  std::deque<Instruction> insts_;
-  std::vector<std::unique_ptr<Metadata>> mds_;
-  std::vector<std::unique_ptr<AttrSet>> attrSets_;
-  std::vector<std::unique_ptr<AttrList>> attrLists_;
+  // Declared first, so it is destroyed last: the instructions and everything it holds go before the arena's blocks.
+  Arena arena_;
+  std::deque<Instruction, ArenaAllocator<Instruction>> insts_{ArenaAllocator<Instruction>(&arena_)};
   Type *void_, *half_, *float_, *double_, *label_, *metadata_;
   Type *intTys_[65] = {};  // by width, in front of typeIntern_
   struct ConstSlot {

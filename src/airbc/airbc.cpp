@@ -10,6 +10,18 @@
 #include <stdexcept>
 #include <unordered_map>
 
+#if defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#include <sanitizer/asan_interface.h>
+#define AIRBC_ARENA_POISON(p, n) ASAN_POISON_MEMORY_REGION(p, n)
+#define AIRBC_ARENA_UNPOISON(p, n) ASAN_UNPOISON_MEMORY_REGION(p, n)
+#endif
+#endif
+#ifndef AIRBC_ARENA_POISON
+#define AIRBC_ARENA_POISON(p, n) ((void)(p), (void)(n))
+#define AIRBC_ARENA_UNPOISON(p, n) ((void)(p), (void)(n))
+#endif
+
 namespace airbc {
 
 // ================================================================ attributes
@@ -90,10 +102,95 @@ Module::Module() {
 }
 Module::~Module() = default;
 
+// ================================================================ arena
+namespace {
+// This thread's blocks of Arena::kBlockBytes that no arena holds, newest first.
+struct BlockCache {
+  void *head = nullptr; // chain through the first word of each block
+  size_t count = 0;
+  ~BlockCache() {
+    while (head) {
+      void *next = *static_cast<void **>(head);
+      std::free(head);
+      head = next;
+    }
+  }
+};
+thread_local BlockCache blockCache;
+} // namespace
+
+void *Arena::alloc(size_t bytes) {
+  bytes = (bytes + 15) & ~size_t(15);
+  if (size_t(end_ - cur_) >= bytes) {
+    void *p = cur_;
+    cur_ += bytes;
+    used_ += bytes;
+    AIRBC_ARENA_UNPOISON(p, bytes);
+    return p;
+  }
+  return allocSlow(bytes);
+}
+
+void *Arena::allocSlow(size_t bytes) {
+  used_ += bytes;
+  if (bytes > kBlockBytes / 4) {
+    // Too big to share a block: its own, freed with the arena.
+    Block *b = static_cast<Block *>(std::malloc(sizeof(Block) + bytes));
+    if (!b) throw std::bad_alloc();
+    b->bytes = sizeof(Block) + bytes;
+    b->next = large_;
+    large_ = b;
+    reserved_ += b->bytes;
+    return b + 1;
+  }
+  Block *b;
+  if (blockCache.head) {
+    b = static_cast<Block *>(blockCache.head);
+    blockCache.head = b->next;
+    --blockCache.count;
+  } else {
+    b = static_cast<Block *>(std::malloc(kBlockBytes));
+    if (!b) throw std::bad_alloc();
+  }
+  b->bytes = kBlockBytes;
+  b->next = blocks_;
+  blocks_ = b;
+  reserved_ += kBlockBytes;
+  cur_ = reinterpret_cast<char *>(b + 1);
+  end_ = reinterpret_cast<char *>(b) + kBlockBytes;
+  // Under AddressSanitizer a block's payload is unusable until handed out, and again once the arena is gone.
+  AIRBC_ARENA_POISON(cur_, size_t(end_ - cur_));
+  void *p = cur_;
+  cur_ += bytes;
+  AIRBC_ARENA_UNPOISON(p, bytes);
+  return p;
+}
+
+Arena::~Arena() {
+  for (Finalizer *f = finalizers_; f; f = f->next) f->destroy(f->object);
+  for (Block *b = large_; b;) {
+    Block *next = b->next;
+    std::free(b);
+    b = next;
+  }
+  for (Block *b = blocks_; b;) {
+    Block *next = b->next;
+    if ((blockCache.count + 1) * kBlockBytes <= kKeptBytesPerThread) {
+      AIRBC_ARENA_POISON(b + 1, kBlockBytes - sizeof(Block));
+      b->next = static_cast<Block *>(blockCache.head);
+      blockCache.head = b;
+      ++blockCache.count;
+    } else {
+      std::free(b);
+    }
+    b = next;
+  }
+}
+
 Type *Module::newType(Type::Kind k) {
-  types_.push_back(std::make_unique<Type>());
-  types_.back()->kind = k;
-  return types_.back().get();
+  Type *t = make<Type>();
+  t->kind = k;
+  return t;
 }
 
 // Intern keys: a tag, then fixed-width raw fields, so no two keys of one map can collide. Short keys stay in
@@ -328,33 +425,28 @@ const AttrSet *Module::attrSet(std::vector<Attr> attrs) {
   for (const Attr &a : attrs) k += attrKey(a) + ";";
   const AttrSet *&s = attrSetIntern_[k];
   if (!s) {
-    attrSets_.push_back(std::make_unique<AttrSet>(std::move(attrs)));
-    s = attrSets_.back().get();
+    s = make<AttrSet>(std::move(attrs));
   }
   return s;
 }
 const AttrList *Module::attrList(std::vector<Attr> fn, std::vector<Attr> ret, std::vector<std::vector<Attr>> params) {
-  auto al = std::make_unique<AttrList>();
-  if (!fn.empty()) al->sets.push_back({AttrList::FunctionIndex, attrSet(std::move(fn))});
-  if (!ret.empty()) al->sets.push_back({AttrList::ReturnIndex, attrSet(std::move(ret))});
+  AttrList al;
+  if (!fn.empty()) al.sets.push_back({AttrList::FunctionIndex, attrSet(std::move(fn))});
+  if (!ret.empty()) al.sets.push_back({AttrList::ReturnIndex, attrSet(std::move(ret))});
   for (unsigned i = 0; i < params.size(); ++i)
-    if (!params[i].empty()) al->sets.push_back({1 + i, attrSet(std::move(params[i]))});
-  if (al->sets.empty()) return nullptr;
+    if (!params[i].empty()) al.sets.push_back({1 + i, attrSet(std::move(params[i]))});
+  if (al.sets.empty()) return nullptr;
   std::string k;
-  for (auto &p : al->sets) k += numKey(p.first) + ptrKey(p.second);
+  for (auto &p : al.sets) k += numKey(p.first) + ptrKey(p.second);
   const AttrList *&r = attrListIntern_[k];
-  if (!r) {
-    attrLists_.push_back(std::move(al));
-    r = attrLists_.back().get();
-  }
+  if (!r) r = make<AttrList>(std::move(al));
   return r;
 }
 
 Metadata *Module::mdString(const std::string &s) {
   Metadata *&m = mdIntern_["S" + s];
   if (!m) {
-    mds_.push_back(std::make_unique<Metadata>());
-    m = mds_.back().get();
+    m = make<Metadata>();
     m->kind = Metadata::String;
     m->str = s;
   }
@@ -363,8 +455,7 @@ Metadata *Module::mdString(const std::string &s) {
 Metadata *Module::mdValue(Value *v) {
   Metadata *&m = mdIntern_["V" + ptrKey(v)];
   if (!m) {
-    mds_.push_back(std::make_unique<Metadata>());
-    m = mds_.back().get();
+    m = make<Metadata>();
     m->kind = Metadata::ValueMD;
     m->val = v;
   }
@@ -375,16 +466,14 @@ Metadata *Module::mdNode(std::vector<Metadata *> ops) {
   for (Metadata *o : ops) k += ptrKey(o);
   Metadata *&m = mdIntern_[k];
   if (!m) {
-    mds_.push_back(std::make_unique<Metadata>());
-    m = mds_.back().get();
+    m = make<Metadata>();
     m->kind = Metadata::Node;
     m->ops = std::move(ops);
   }
   return m;
 }
 Metadata *Module::mdDistinct(std::vector<Metadata *> ops) {
-  mds_.push_back(std::make_unique<Metadata>());
-  Metadata *m = mds_.back().get();
+  Metadata *m = make<Metadata>();
   m->kind = Metadata::Node;
   m->ops = std::move(ops);
   m->distinct = true;
