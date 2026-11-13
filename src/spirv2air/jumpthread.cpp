@@ -53,6 +53,30 @@ size_t edgesTo(const BasicBlock* from, const BasicBlock* to) {
 
 // Dominators (Cooper, Harvey, Kennedy) and dominance frontiers of the blocks reachable from the entry. Blocks are
 // numbered in layout order; edges are kept per terminator operand.
+// Rows of block numbers in two flat arrays (compressed rows): row b is v[at[b] .. at[b + 1]). Filled in two passes, one
+// to count and one to place, so building one allocates twice however many rows there are.
+struct Rows {
+  struct View {
+    const int* first;
+    const int* last;
+    const int* begin() const { return first; }
+    const int* end() const { return last; }
+    size_t size() const { return size_t(last - first); }
+    int operator[](size_t k) const { return first[k]; }
+  };
+  View operator[](size_t b) const { return {v.data() + at[b], v.data() + at[b + 1]}; }
+  // Pass 1: count(b) once per element of row b; then close(); pass 2: put(b, x) in row order.
+  void open(size_t n) { at.assign(n + 1, 0); }
+  void count(size_t b) { ++at[b + 1]; }
+  void close() {
+    for (size_t b = 0; b + 1 < at.size(); ++b) at[b + 1] += at[b];
+    v.resize(size_t(at.back()));
+    fill.assign(at.begin(), at.end() - 1);
+  }
+  void put(size_t b, int x) { v[size_t(fill[b]++)] = x; }
+  std::vector<int> at, v, fill;
+};
+
 struct Cfg {
   // For the verifier: the blocks are found through a map.
   explicit Cfg(const Function* f) : blocks(f->blocks) {
@@ -70,13 +94,17 @@ struct Cfg {
 
   void build() {
     const size_t n = blocks.size();
-    succ.resize(n);
-    pred.resize(n);
+    succ.open(n);
+    pred.open(n);
+    for (size_t b = 0; b < n; ++b)
+      for (const BasicBlock* s : successors(blocks[b])) succ.count(b), pred.count(size_t(indexOf(s)));
+    succ.close();
+    pred.close();
     for (size_t b = 0; b < n; ++b)
       for (const BasicBlock* s : successors(blocks[b])) {
-        int j = indexOf(s);
-        succ[b].push_back(j);
-        pred[j].push_back(int(b));
+        const int j = indexOf(s);
+        succ.put(b, j);
+        pred.put(size_t(j), int(b));
       }
     po.assign(n, -1);
     std::vector<char> seen(n, 0);
@@ -116,9 +144,12 @@ struct Cfg {
         if (idom[b] != d) idom[b] = d, changed = true;
       }
     }
-    children.resize(n);
+    children.open(n);
     for (int b : rpo)
-      if (b != 0) children[idom[b]].push_back(b);
+      if (b != 0) children.count(size_t(idom[b]));
+    children.close();
+    for (int b : rpo)
+      if (b != 0) children.put(size_t(idom[b]), b);
     // Dominator tree intervals for O(1) dominance tests.
     tin.assign(n, 0);
     tout.assign(n, 0);
@@ -142,12 +173,16 @@ struct Cfg {
   bool dominates(int a, int b) const { return tin[a] <= tin[b] && tout[b] <= tout[a]; }
 
   // Block `b`'s frontier lists (only for the reachable blocks).
-  std::vector<std::vector<int>> frontiers() const {
-    std::vector<std::vector<int>> frontier(blocks.size());
-    for (int b : rpo) {
-      if (pred[b].size() < 2) continue;
-      for (int p : pred[b])
-        for (int r = p; po[r] >= 0 && r != idom[b]; r = idom[r]) frontier[r].push_back(b);
+  Rows frontiers() const {
+    Rows frontier;
+    frontier.open(blocks.size());
+    for (int pass = 0; pass < 2; ++pass) {
+      for (int b : rpo) {
+        if (pred[b].size() < 2) continue;
+        for (int p : pred[b])
+          for (int r = p; po[r] >= 0 && r != idom[b]; r = idom[r]) pass ? frontier.put(size_t(r), b) : frontier.count(size_t(r));
+      }
+      if (!pass) frontier.close();
     }
     return frontier;
   }
@@ -156,7 +191,7 @@ struct Cfg {
   bool tagged = false;
   uint32_t base = 0;
   std::unordered_map<const BasicBlock*, int> index;  // only without tags
-  std::vector<std::vector<int>> succ, pred, children;
+  Rows succ, pred, children;
   std::vector<int> po, rpo, idom, tin, tout;
 };
 
@@ -423,7 +458,7 @@ class Threader {
     const int hb = cfg.indexOf(h);
     std::vector<char> hasPhi(cfg.blocks.size(), 0);
     {
-      std::vector<std::vector<int>> frontier = cfg.frontiers();
+      const Rows frontier = cfg.frontiers();
       std::vector<int> work;
       for (const BasicBlock* d : targets) {
         int b = cfg.indexOf(d);
