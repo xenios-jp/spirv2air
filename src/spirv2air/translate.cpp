@@ -267,7 +267,8 @@ class Translator {
   std::vector<BasicBlock*> blocks_;  // by label id
   std::vector<bool> labels_;         // per id: defined by an OpLabel
   std::vector<std::pair<Instruction*, Inst>> phis_;
-  std::map<std::string, Function*> decls_;
+  std::unordered_map<std::string, Function*> decls_;
+  const AttrList* classAttrs_[8] = {};  // declare()'s attribute list per AttrClass, built on first use
   std::map<uint32_t, std::pair<Value*, Value*>> sampledImages_;  // id -> (texture, sampler)
   std::map<uint32_t, uint32_t> sampledImageType_;                 // id -> SPIR-V image type
   std::map<uint32_t, uint32_t> attachmentArgs_;  // input attachment variable -> AIR argument
@@ -1705,36 +1706,40 @@ Function* Translator::declare(const std::string& name, Type* ret, const std::vec
                               AttrClass cls) {
   Function*& f = decls_[name];
   if (f) return f;
-  std::vector<Attr> a;
-  // The attribute sets Apple's compiler writes on the declarations of these intrinsics for MSL (clean Q30): ALU, math,
-  // bit and convert intrinsics are pure; derivatives, SIMD and barrier operations are convergent; implicit-LOD
-  // samples and LOD queries are convergent reads of their arguments, while explicit-gradient samples, reads and
-  // gathers are not convergent; atomics and discard only promise progress.
-  switch (cls) {
-    case AttrClass::Pure:
-    case AttrClass::Bits:
-      a = {Attr::get("mustprogress"), Attr::get("nofree"),   Attr::get("nosync"),
-           Attr::get("nounwind"),     Attr::get("readnone"), Attr::get("willreturn")};
-      break;
-    case AttrClass::Texture:
-      a = {Attr::get("argmemonly"), Attr::get("convergent"), Attr::get("mustprogress"), Attr::get("nofree"),
-           Attr::get("nounwind"),   Attr::get("readonly"),   Attr::get("willreturn")};
-      break;
-    case AttrClass::TextureRead:
-      a = {Attr::get("argmemonly"), Attr::get("mustprogress"), Attr::get("nofree"),
-           Attr::get("nounwind"),   Attr::get("readonly"),     Attr::get("willreturn")};
-      break;
-    case AttrClass::Derivative:
-    case AttrClass::Barrier:
-      a = {Attr::get("convergent"), Attr::get("mustprogress"), Attr::get("nounwind"), Attr::get("willreturn")};
-      break;
-    case AttrClass::Discard:
-    case AttrClass::Atomic:
-      a = {Attr::get("mustprogress"), Attr::get("nounwind"), Attr::get("willreturn")};
-      break;
+  const AttrList*& list = classAttrs_[int(cls)];
+  if (!list) {
+    std::vector<Attr> a;
+    // The attribute sets Apple's compiler writes on the declarations of these intrinsics for MSL (clean Q30): ALU, math,
+    // bit and convert intrinsics are pure; derivatives, SIMD and barrier operations are convergent; implicit-LOD
+    // samples and LOD queries are convergent reads of their arguments, while explicit-gradient samples, reads and
+    // gathers are not convergent; atomics and discard only promise progress.
+    switch (cls) {
+      case AttrClass::Pure:
+      case AttrClass::Bits:
+        a = {Attr::get("mustprogress"), Attr::get("nofree"),   Attr::get("nosync"),
+             Attr::get("nounwind"),     Attr::get("readnone"), Attr::get("willreturn")};
+        break;
+      case AttrClass::Texture:
+        a = {Attr::get("argmemonly"), Attr::get("convergent"), Attr::get("mustprogress"), Attr::get("nofree"),
+             Attr::get("nounwind"),   Attr::get("readonly"),   Attr::get("willreturn")};
+        break;
+      case AttrClass::TextureRead:
+        a = {Attr::get("argmemonly"), Attr::get("mustprogress"), Attr::get("nofree"),
+             Attr::get("nounwind"),   Attr::get("readonly"),     Attr::get("willreturn")};
+        break;
+      case AttrClass::Derivative:
+      case AttrClass::Barrier:
+        a = {Attr::get("convergent"), Attr::get("mustprogress"), Attr::get("nounwind"), Attr::get("willreturn")};
+        break;
+      case AttrClass::Discard:
+      case AttrClass::Atomic:
+        a = {Attr::get("mustprogress"), Attr::get("nounwind"), Attr::get("willreturn")};
+        break;
+    }
+    list = m_.attrList(a);
   }
   f = m_.addFunction(name, m_.fnTy(ret, params));
-  f->attrs = m_.attrList(a);
+  f->attrs = list;
   f->unnamedAddr = 2;
   return f;
 }
