@@ -90,7 +90,7 @@ int main(int argc, char** argv) {
   if (argc == 2 && std::string(argv[1]) == "--help") {
     std::puts(
         "usage: spirv2air_cli INPUT.spv OUTPUT.metallib [--buffer SET:BINDING:INDEX] [--texture SET:BINDING:INDEX] "
-        "[--push-constant INDEX] [--no-jump-thread] [--function-constant-set SET] [--storage-buffer SET:BINDING:OFFSET] [--platform macos|ios|ios-simulator] [--min-os MAJOR[.MINOR]] [--half-packing-rounding rne|rtz]");
+        "[--push-constant INDEX] [--no-jump-thread] [--function-constant-set SET] [--storage-buffer SET:BINDING:OFFSET] [--platform macos|ios|ios-simulator] [--min-os MAJOR[.MINOR]] [--half-packing-rounding rne|rtz] [--framebuffer-fetch-mask MASK]");
     std::puts("       spirv2air_cli --manifest INPUT.txt OUTPUT_DIR [--function-constant-set SET] [--storage-buffer SET:BINDING:OFFSET] [--half-packing-rounding rne|rtz]\n       spirv2air_cli INPUT.txt OUTPUT_DIR (legacy batch form)");
     return 0;
   }
@@ -117,6 +117,7 @@ int main(int argc, char** argv) {
       else if (flag == "--half-packing-rounding" && i + 1 < argc) opts.halfPackingRounding = halfRounding(argv[++i]);
  else if (flag == "--storage-buffer" && i + 1 < argc) opts.graphics.storageBuffers.push_back(storageSlot(argv[++i]));
       else if (flag == "--function-constant-set" && i + 1 < argc) opts.graphics.functionConstantSet = int32_t(number(argv[++i]));
+      else if (flag == "--framebuffer-fetch-mask" && i + 1 < argc) opts.graphics.framebufferFetchMask = uint32_t(number(argv[++i]));
       else if (flag == "--platform" && i + 1 < argc) {
         std::string value = argv[++i];
         if (value == "macos") opts.platform = spirv2air::Platform::MacOS;
