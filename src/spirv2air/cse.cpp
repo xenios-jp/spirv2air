@@ -158,6 +158,8 @@ class Cse {
     n_ = 0;
     for (BasicBlock* b : f->blocks)
       for (Instruction* i : b->insts) i->tag = ibase_ + n_++;
+    bbase_ = m.allocTags(unsigned(f->blocks.size()));
+    for (size_t k = 0; k < f->blocks.size(); ++k) f->blocks[k]->tag = bbase_ + uint32_t(k);
     repl_.assign(n_, nullptr);
   }
 
@@ -376,14 +378,12 @@ class Cse {
   void buildTree() {
     const auto& blocks = f_->blocks;
     const size_t n = blocks.size();
-    std::unordered_map<const BasicBlock*, int> id;
-    for (size_t b = 0; b < n; ++b) id.emplace(blocks[b], int(b));
     std::vector<std::vector<int>> succ(n), pred(n);
     for (size_t b = 0; b < n; ++b) {
       if (blocks[b]->insts.empty()) continue;
       const Instruction* t = blocks[b]->insts.back();
       if (t->op != Op::Br && t->op != Op::Switch) continue;
-      for (BasicBlock* s : t->bbs) succ[b].push_back(id.at(s)), pred[id.at(s)].push_back(int(b));
+      for (BasicBlock* s : t->bbs) succ[b].push_back(int(s->tag - bbase_)), pred[s->tag - bbase_].push_back(int(b));
     }
     std::vector<int> post, po(n, -1);
     std::vector<char> seen(n, 0);
@@ -461,7 +461,7 @@ class Cse {
   std::vector<size_t> undo_;  // the slots of the table's entries in insertion order, emptied when their block's
                               // subtree ends
   std::vector<Instruction*> kept_;
-  uint32_t ibase_ = 0;
+  uint32_t ibase_ = 0, bbase_ = 0;  // dense ids (tag - base) of the instructions and of the blocks
   unsigned n_ = 0;
   std::vector<Value*> repl_;  // by instruction tag: the available instruction that replaces it
 };
