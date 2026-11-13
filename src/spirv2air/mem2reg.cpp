@@ -186,54 +186,85 @@ struct Row {
 // otherwise only loaded and stored whole. That leaves it promotable, and the lanes then go their own way in
 // scalarize.cpp, so a lane stored once and never read again no longer keeps its computation alive.
 void wholeVectorAccesses(Module& m, Function* f) {
-  std::unordered_map<const Value*, char> vectors;  // alloca -> still rewritable
+  std::vector<Instruction*> vectors;  // the entry block's vector allocas
   for (Instruction* i : f->blocks[0]->insts)
-    if (i->op == Op::Alloca && i->srcElemTy->kind == Type::Vector) vectors[i] = 1;
+    if (i->op == Op::Alloca && i->srcElemTy->kind == Type::Vector) vectors.push_back(i);
   if (vectors.empty()) return;
-  std::unordered_map<const Value*, Instruction*> elementOf;  // GEP -> its alloca
+  // Dense ids (tag - base) for the allocas, then for the element GEPs as they are met, so that asking of an operand
+  // "is this one of them" is a compare and not a hash lookup.
+  unsigned total = 0;
+  for (const BasicBlock* b : f->blocks) total += unsigned(b->insts.size());
+  const uint32_t base = m.allocTags(unsigned(vectors.size()) + total);
+  const uint32_t gepBase = base + uint32_t(vectors.size());
+  // The tags are scratch, but the split's table above is indexed by the ones the instructions had, so they come back.
+  std::vector<uint32_t> savedAllocaTags, savedGepTags;
+  for (size_t a = 0; a < vectors.size(); ++a) savedAllocaTags.push_back(vectors[a]->tag), vectors[a]->tag = base + uint32_t(a);
+  std::vector<char> rewritable(vectors.size(), 1);  // by alloca id: still rewritable
+  std::vector<Instruction*> geps;                   // the element GEPs, by id
+  std::vector<unsigned> gepAlloca;                  // ... and the alloca (id) each addresses
+  auto vectorOf = [&](const Value* v) -> int {
+    unsigned k = v->tag - base;
+    return k < vectors.size() && v->vk == Value::Inst && vectors[k] == v ? int(k) : -1;
+  };
+  auto gepOf = [&](const Value* v) -> int {
+    unsigned k = v->tag - gepBase;
+    return k < geps.size() && v->vk == Value::Inst && geps[k] == v ? int(k) : -1;
+  };
   for (BasicBlock* b : f->blocks)
     for (Instruction* i : b->insts)
       for (size_t k = 0; k < i->ops.size(); ++k) {
-        auto it = vectors.find(i->ops[k]);
-        if (it == vectors.end()) continue;
-        const Type* t = static_cast<const Instruction*>(i->ops[k])->srcElemTy;
+        const int a = vectorOf(i->ops[k]);
+        if (a < 0) continue;
+        const Type* t = vectors[a]->srcElemTy;
         uint64_t first = 1, c = 0;
         bool whole = !i->isVolatile && ((i->op == Op::Load && k == 0 && i->type == t) ||
                                         (i->op == Op::Store && k == 1 && i->ops[0]->type == t));
         bool element = i->op == Op::GEP && k == 0 && i->ops.size() == 3 && constantIndex(i->ops[1], first) &&
                        first == 0 && constantIndex(i->ops[2], c) && c < t->n;
-        if (element)
-          elementOf[i] = static_cast<Instruction*>(i->ops[k]);
-        else if (!whole)
-          it->second = 0;
+        if (element) {
+          if (gepOf(i) < 0) {
+            savedGepTags.push_back(i->tag);
+            i->tag = gepBase + uint32_t(geps.size());
+            geps.push_back(i);
+            gepAlloca.push_back(unsigned(a));
+          } else {
+            gepAlloca[gepOf(i)] = unsigned(a);
+          }
+        } else if (!whole) {
+          rewritable[a] = 0;
+        }
       }
   // Every use of an element GEP has to be a non-volatile load or store of the element through it.
   for (BasicBlock* b : f->blocks)
     for (Instruction* i : b->insts)
       for (size_t k = 0; k < i->ops.size(); ++k) {
-        auto it = elementOf.find(i->ops[k]);
-        if (it == elementOf.end()) continue;
-        const Type* e = it->second->srcElemTy->elem;
+        const int g = gepOf(i->ops[k]);
+        if (g < 0) continue;
+        const Type* e = vectors[gepAlloca[g]]->srcElemTy->elem;
         bool ok = !i->isVolatile && ((i->op == Op::Load && k == 0 && i->type == e) ||
                                      (i->op == Op::Store && k == 1 && i->ops[0]->type == e));
-        if (!ok) vectors[it->second] = 0;
+        if (!ok) rewritable[gepAlloca[g]] = 0;
       }
+  auto restoreTags = [&] {
+    for (size_t a = 0; a < vectors.size(); ++a) vectors[a]->tag = savedAllocaTags[a];
+    for (size_t g = 0; g < geps.size(); ++g) geps[g]->tag = savedGepTags[g];
+  };
   bool any = false;
-  for (auto& [g, a] : elementOf) any |= vectors[a] != 0;
-  if (!any) return;
+  for (unsigned a : gepAlloca) any |= rewritable[a] != 0;
+  if (!any) return restoreTags();
   for (BasicBlock* b : f->blocks) {
     std::vector<Instruction*> list;
     list.reserve(b->insts.size());
     for (Instruction* i : b->insts) {
       Instruction* a = nullptr;
       if (i->op == Op::GEP) {
-        auto it = elementOf.find(i);
-        if (it != elementOf.end() && vectors[it->second]) continue;  // its loads and stores no longer use it
+        const int g = gepOf(i);
+        if (g >= 0 && rewritable[gepAlloca[g]]) continue;  // its loads and stores no longer use it
       }
       size_t k = i->op == Op::Load ? 0 : i->op == Op::Store ? 1 : 2;
       if (k < i->ops.size()) {
-        auto it = elementOf.find(i->ops[k]);
-        if (it != elementOf.end() && vectors[it->second]) a = it->second;
+        const int g = gepOf(i->ops[k]);
+        if (g >= 0 && rewritable[gepAlloca[g]]) a = vectors[gepAlloca[g]];
       }
       if (!a) {
         list.push_back(i);
@@ -261,6 +292,7 @@ void wholeVectorAccesses(Module& m, Function* f) {
     }
     b->insts = std::move(list);
   }
+  restoreTags();
 }
 
 }  // namespace
