@@ -46,11 +46,32 @@ bool hasFunctionAttr(const AttrList* l, const Attr& a) {
   return false;
 }
 
-// A call whose callee (or call site) carries the given function attribute.
-bool callHas(const Instruction* i, const Attr& a) {
-  if (i->ops.empty() || i->ops[0]->vk != Value::Func) return false;
-  return hasFunctionAttr(static_cast<const Function*>(i->ops[0])->attrs, a) || hasFunctionAttr(i->attrs, a);
-}
+// Whether calls through an attribute list are readnone / readonly. Attribute lists are interned (equal lists are one
+// pointer) and a function makes many calls through a handful of them, so the answer is kept per list.
+class CallAttrs {
+ public:
+  // A call whose callee (or call site) carries the function attribute readnone / readonly.
+  bool readnone(const Instruction* i) { return has(i, &Flags::readnone); }
+  bool readonly(const Instruction* i) { return has(i, &Flags::readonly); }
+
+ private:
+  struct Flags {
+    const AttrList* list;
+    bool readnone, readonly;
+  };
+  bool has(const Instruction* i, bool Flags::*which) {
+    if (i->ops.empty() || i->ops[0]->vk != Value::Func) return false;
+    return find(static_cast<const Function*>(i->ops[0])->attrs).*which || find(i->attrs).*which;
+  }
+  const Flags& find(const AttrList* l) {
+    for (const Flags& f : known_)
+      if (f.list == l) return f;
+    static const Attr readnone = Attr::get("readnone"), readonly = Attr::get("readonly");
+    known_.push_back({l, hasFunctionAttr(l, readnone), hasFunctionAttr(l, readonly)});
+    return known_.back();
+  }
+  std::vector<Flags> known_;
+};
 
 unsigned addrSpaceOf(const Value* ptr) { return ptr->type->kind == Type::Pointer ? ptr->type->n : ~0u; }
 
@@ -195,11 +216,11 @@ class Cse {
     for (const BasicBlock* b : f_->blocks)
       for (const Instruction* i : b->insts) {
         if (i->op == Op::Store && addrSpaceOf(i->ops[1]) == 1) deviceWritten_ = true;
-        if (i->op == Op::Call && !callHas(i, readnone_) && !callHas(i, readonly_)) deviceWritten_ = true;
+        if (i->op == Op::Call && !calls_.readnone(i) && !calls_.readonly(i)) deviceWritten_ = true;
       }
   }
 
-  bool eligible(const Instruction* i) const {
+  bool eligible(const Instruction* i) {
     switch (i->op) {
       case Op::BinOp:
       case Op::Cast:
@@ -219,7 +240,7 @@ class Cse {
         return as == 2 || (as == 1 && !deviceWritten_);
       }
       case Op::Call:
-        return !i->type->isVoid() && callHas(i, readnone_);
+        return !i->type->isVoid() && calls_.readnone(i);
       default:
         return false;
     }
@@ -432,7 +453,7 @@ class Cse {
     PrivateValue old;
   };
   std::vector<PrivateUndo> privateUndo_;
-  const Attr readnone_ = Attr::get("readnone"), readonly_ = Attr::get("readonly");
+  CallAttrs calls_;
   bool deviceWritten_ = false, replaced_ = false;
   std::vector<std::vector<int>> children_;
   Table table_;
