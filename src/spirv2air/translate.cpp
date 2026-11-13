@@ -26,6 +26,7 @@
 
 #include "airbc.h"
 #include "metallib/metallib.h"
+#include "spirv2air/branchfold.h"
 #include "spirv2air/cleanup.h"
 #include "spirv2air/cse.h"
 #include "spirv2air/instsimplify.h"
@@ -3201,6 +3202,7 @@ std::vector<uint8_t> Translator::run() {
   // phis that join the arms and so the next condition, hence the rounds until neither pass finds anything. Without baked
   // values (the generic conversion) there is little to decide and the rounds would only be cost.
   if (!options_.graphics.functionConstantValues.empty()) {
+    if (foldKnownBranches(m_, main_)) cleanupFunction(m_, main_);
     for (bool again = true; again;) {
       again = simplifyInstructions(m_, main_);
       const CleanupStats removed = cleanupFunction(m_, main_);

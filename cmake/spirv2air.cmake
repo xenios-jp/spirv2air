@@ -31,7 +31,8 @@ if(SPIRV2AIR_BUILD_TRANSLATOR AND NOT TARGET spirv2air)
     "${SPIRV2AIR_ROOT}/src/spirv2air/instsimplify.cpp"
     "${SPIRV2AIR_ROOT}/src/spirv2air/simplifycfg.cpp"
     "${SPIRV2AIR_ROOT}/src/spirv2air/jumpthread.cpp"
-    "${SPIRV2AIR_ROOT}/src/spirv2air/cleanup.cpp")
+    "${SPIRV2AIR_ROOT}/src/spirv2air/cleanup.cpp"
+    "${SPIRV2AIR_ROOT}/src/spirv2air/branchfold.cpp")
   target_include_directories(spirv2air PUBLIC
     $<BUILD_INTERFACE:${SPIRV2AIR_ROOT}/src/spirv2air> $<INSTALL_INTERFACE:include/spirv2air>
     PRIVATE "${SPIRV2AIR_ROOT}/src" "${SPIRV2AIR_SPIRV_HEADERS_DIR}")
