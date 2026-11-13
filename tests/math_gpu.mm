@@ -10,11 +10,19 @@
 // checked against hand-written MSL for the same operations, compiled at run time, on the same inputs: compute (the MSL
 // with fast math off) and fragment (default fast math), bit for bit with NaN == NaN, over ordinary values, zeros of
 // both signs, infinities, NaNs and values that overflow or underflow a squared length.
-// usage: math_gpu <ieee.frag.spv> <glsl_ext.comp.spv> <glsl_ext.frag.spv>
+//
+// Xenia's zero-multiply guard, NMin(|x|, |y|) == 0 ? 0 : x * y, whose test spirv2air lowers as x == 0 || y == 0, is
+// checked in a vertex and a pixel shader (fast math) and a compute shader (fast math off) on every pair of operands
+// from NaNs of both signs, infinities, signed zeros, subnormals, the smallest normals and values whose product
+// overflows or underflows: each shader computes the guard both in the lowered form and in a form the translator leaves
+// alone (0 == NMin(...)), and the two must agree bit for bit (any NaN equals any NaN), and with the definition.
+// usage: math_gpu <ieee.frag.spv> <glsl_ext.comp.spv> <glsl_ext.frag.spv> <guard.frag.spv> <guard.vert.spv>
+//                 <guard.comp.spv>
 #import <Metal/Metal.h>
 
 #include <spirv2air.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -430,18 +438,192 @@ int testGlslFragment(id<MTLDevice> device, id<MTLCommandQueue> queue, const char
   return failures ? 1 : 0;
 }
 
+NSString* const kGuardSource = @R"(
+#include <metal_stdlib>
+using namespace metal;
+vertex float4 vtx(uint v [[vertex_id]]) {
+  const float2 p[3] = {float2(-1, -1), float2(3, -1), float2(-1, 3)};
+  return float4(p[v], 0.5, 1);
+}
+struct In {
+  float4 r0 [[user(texcoord0), flat]];
+  float4 r1 [[user(texcoord1), flat]];
+};
+struct Out {
+  float4 r0 [[color(0)]];
+  float4 r1 [[color(1)]];
+};
+fragment Out pass(In in [[stage_in]]) { return {in.r0, in.r1}; }
+)";
+
+enum class GuardStage { Vertex, Fragment, Compute };
+
+// Checks one result row (8 floats: the lowered form's 4 then the reference's 4) of operands (a, b). FLUSH: the stage
+// treats subnormal operands and results as zeros of their sign.
+int checkGuard(const char* stage, float a, float b, const float* got, bool flush) {
+  auto subnormal = [](float x) { return std::fpclassify(x) == FP_SUBNORMAL; };
+  auto isZero = [&](float x) { return x == 0 || (flush && subnormal(x)); };
+  const bool zero = isZero(a) || isZero(b);
+  const float product = a * b;
+  // An underflowed product's sign after flushing is not part of the definition: compare it as a zero of any sign.
+  const bool flushedProduct = !zero && flush && subnormal(product);
+  const float g = zero ? 0.0f : flushedProduct ? 0.0f : product;
+  const float want[4] = {g, g, g, zero ? 1.0f : 0.0f};
+  auto same = [](float x, float y) { return std::isnan(x) ? std::isnan(y) : memcmp(&x, &y, 4) == 0; };
+  int failures = 0;
+  for (int k = 0; k < 4; ++k) {
+    const float lowered = got[k], reference = got[4 + k];
+    const bool zeroOfAnySign = flushedProduct && k < 3;
+    const bool definitionOk = zeroOfAnySign ? lowered == 0 : same(lowered, want[k]);
+    if (!same(lowered, reference) || !definitionOk) {
+      if (++failures <= 3)
+        fprintf(stderr, "FAIL guard %s a=%a b=%a component %d: lowered %a (0x%08x), reference %a, want %a\n", stage, a,
+                b, k, lowered, *reinterpret_cast<const uint32_t*>(&lowered), reference, want[k]);
+    }
+  }
+  return failures;
+}
+
+std::vector<float> guardValues() {
+  auto bits = [](uint32_t u) {
+    float f;
+    memcpy(&f, &u, 4);
+    return f;
+  };
+  return {std::nanf(""), -std::nanf(""), bits(0x7FC12345), INFINITY, -INFINITY, 0.0f, -0.0f, 1.0f, -2.5f, 1e-30f,
+          1e-20f,        1e20f,          3e38f,           0x1p-149f, -0x1p-149f, 0x1.fffffcp-127f, 0x1p-126f, -0x1p-126f};
+}
+
+int testGuard(id<MTLDevice> device, id<MTLCommandQueue> queue, GuardStage stage, const char* path) {
+  @autoreleasepool {
+    const char* name = stage == GuardStage::Vertex ? "vertex" : stage == GuardStage::Fragment ? "pixel" : "compute";
+    const std::vector<float> values = guardValues();
+    std::vector<float> pairs;
+    for (float a : values)
+      for (float b : values) pairs.insert(pairs.end(), {a, b});
+    const NSUInteger n = pairs.size() / 2;
+    std::vector<uint32_t> words = readWords(path);
+    spirv2air::Options options;
+    if (stage == GuardStage::Compute) options.bindings = {{0, 0, 0, 0}, {0, 1, 1, 0}};
+    spirv2air::Result r = spirv2air::translate(words.data(), words.size(), options);
+    if (!r.ok()) return fprintf(stderr, "translate failed: %s\n", r.error.c_str()), 1;
+    NSError* error = nil;
+    dispatch_data_t blob = dispatch_data_create(r.metallib.data(), r.metallib.size(), nullptr, nullptr);
+    id<MTLLibrary> lib = [device newLibraryWithData:blob error:&error];
+    if (!lib) return fprintf(stderr, "newLibraryWithData: %s\n", error.description.UTF8String), 1;
+    std::vector<float> got(n * 8);
+    id<MTLCommandBuffer> cb = [queue commandBuffer];
+    id<MTLBuffer> rows = nil;
+    id<MTLTexture> targets[2] = {nil, nil};
+    if (stage == GuardStage::Compute) {
+      id<MTLComputePipelineState> state =
+          [device newComputePipelineStateWithFunction:[lib newFunctionWithName:@"main"] error:&error];
+      if (!state) return fprintf(stderr, "pipeline: %s\n", error.description.UTF8String), 1;
+      const NSUInteger threads = (n + 63) / 64 * 64;
+      std::vector<float> in(threads * 2, 1.0f);
+      std::copy(pairs.begin(), pairs.end(), in.begin());
+      id<MTLBuffer> input = [device newBufferWithBytes:in.data() length:in.size() * 4 options:MTLResourceStorageModeShared];
+      rows = [device newBufferWithLength:threads * 32 options:MTLResourceStorageModeShared];
+      id<MTLComputeCommandEncoder> e = [cb computeCommandEncoder];
+      [e setComputePipelineState:state];
+      [e setBuffer:input offset:0 atIndex:0];
+      [e setBuffer:rows offset:0 atIndex:1];
+      [e dispatchThreadgroups:MTLSizeMake(threads / 64, 1, 1) threadsPerThreadgroup:MTLSizeMake(64, 1, 1)];
+      [e endEncoding];
+    } else {
+      // One pixel per operand pair: draw i covers pixel (i, 0) and reads its operands through its own argument buffer.
+      id<MTLLibrary> source = [device newLibraryWithSource:kGuardSource options:nil error:&error];
+      if (!source) return fprintf(stderr, "MSL: %s\n", error.description.UTF8String), 1;
+      MTLRenderPipelineDescriptor* d = [MTLRenderPipelineDescriptor new];
+      d.vertexFunction = stage == GuardStage::Vertex ? [lib newFunctionWithName:@"main"] : [source newFunctionWithName:@"vtx"];
+      d.fragmentFunction = stage == GuardStage::Vertex ? [source newFunctionWithName:@"pass"] : [lib newFunctionWithName:@"main"];
+      d.colorAttachments[0].pixelFormat = d.colorAttachments[1].pixelFormat = MTLPixelFormatRGBA32Float;
+      id<MTLRenderPipelineState> state = [device newRenderPipelineStateWithDescriptor:d error:&error];
+      if (!state) return fprintf(stderr, "pipeline: %s\n", error.description.UTF8String), 1;
+      MTLTextureDescriptor* td = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA32Float
+                                                                                    width:n
+                                                                                   height:1
+                                                                                mipmapped:NO];
+      td.usage = MTLTextureUsageRenderTarget;
+      td.storageMode = MTLStorageModeShared;
+      std::vector<float> operands(n * 4, 0.0f);
+      for (NSUInteger i = 0; i < n; ++i) operands[4 * i] = pairs[2 * i], operands[4 * i + 1] = pairs[2 * i + 1];
+      id<MTLBuffer> ubo = [device newBufferWithBytes:operands.data() length:n * 16 options:MTLResourceStorageModeShared];
+      constexpr NSUInteger kTlabSize = 112;
+      id<MTLBuffer> tlab = [device newBufferWithLength:n * kTlabSize options:MTLResourceStorageModeShared];
+      memset(tlab.contents, 0, n * kTlabSize);
+      for (NSUInteger i = 0; i < n; ++i) {
+        uint64_t address = ubo.gpuAddress + i * 16;
+        memcpy(static_cast<uint8_t*>(tlab.contents) + i * kTlabSize, &address, 8);
+      }
+      id<MTLBuffer> resourceHeap = [device newBufferWithLength:24 options:MTLResourceStorageModeShared];
+      id<MTLBuffer> samplerHeap = [device newBufferWithLength:24 options:MTLResourceStorageModeShared];
+      MTLRenderPassDescriptor* pass = [MTLRenderPassDescriptor renderPassDescriptor];
+      for (int t = 0; t < 2; ++t) {
+        targets[t] = [device newTextureWithDescriptor:td];
+        pass.colorAttachments[t].texture = targets[t];
+        pass.colorAttachments[t].loadAction = MTLLoadActionClear;
+        pass.colorAttachments[t].clearColor = MTLClearColorMake(-7, -7, -7, -7);
+        pass.colorAttachments[t].storeAction = MTLStoreActionStore;
+      }
+      id<MTLRenderCommandEncoder> e = [cb renderCommandEncoderWithDescriptor:pass];
+      [e setRenderPipelineState:state];
+      const bool vertex = stage == GuardStage::Vertex;
+      for (NSUInteger i = 0; i < n; ++i) {
+        [e setViewport:{double(i), 0, 1, 1, 0, 1}];
+        [e setScissorRect:{i, 0, 1, 1}];
+        if (vertex) {
+          [e setVertexBuffer:resourceHeap offset:0 atIndex:kResourceHeap];
+          [e setVertexBuffer:samplerHeap offset:0 atIndex:kSamplerHeap];
+          [e setVertexBuffer:tlab offset:i * kTlabSize atIndex:kTlab];
+        } else {
+          [e setFragmentBuffer:resourceHeap offset:0 atIndex:kResourceHeap];
+          [e setFragmentBuffer:samplerHeap offset:0 atIndex:kSamplerHeap];
+          [e setFragmentBuffer:tlab offset:i * kTlabSize atIndex:kTlab];
+        }
+        [e drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
+      }
+      [e useResource:ubo usage:MTLResourceUsageRead stages:vertex ? MTLRenderStageVertex : MTLRenderStageFragment];
+      [e endEncoding];
+    }
+    [cb commit];
+    [cb waitUntilCompleted];
+    if (cb.error) return fprintf(stderr, "command buffer: %s\n", cb.error.description.UTF8String), 1;
+    if (rows) {
+      memcpy(got.data(), rows.contents, n * 32);
+    } else {
+      std::vector<float> texels(n * 4);
+      for (int t = 0; t < 2; ++t) {
+        [targets[t] getBytes:texels.data() bytesPerRow:n * 16 fromRegion:MTLRegionMake2D(0, 0, n, 1) mipmapLevel:0];
+        for (NSUInteger i = 0; i < n; ++i) std::copy_n(&texels[4 * i], 4, &got[8 * i + 4 * t]);
+      }
+    }
+    // Every stage flushes subnormal operands and results here (graphics: fast math; compute: denormals disabled).
+    int failures = 0;
+    for (NSUInteger i = 0; i < n; ++i) failures += checkGuard(name, pairs[2 * i], pairs[2 * i + 1], &got[8 * i], true);
+    printf("math_gpu: guard %s: %lu operand pairs, %d failures\n", name, (unsigned long)n, failures);
+    return failures ? 1 : 0;
+  }
+}
+
 }  // namespace
 
 int main(int argc, const char** argv) {
   @autoreleasepool {
-    if (argc != 4)
-      return fprintf(stderr, "usage: math_gpu <ieee.frag.spv> <glsl_ext.comp.spv> <glsl_ext.frag.spv>\n"), 2;
+    if (argc != 7)
+      return fprintf(stderr,
+                     "usage: math_gpu <ieee.frag.spv> <glsl_ext.comp.spv> <glsl_ext.frag.spv> <guard.frag.spv> "
+                     "<guard.vert.spv> <guard.comp.spv>\n"),
+             2;
     id<MTLDevice> device = MTLCreateSystemDefaultDevice();
     if (!device) return fprintf(stderr, "no Metal device\n"), 1;
     id<MTLCommandQueue> queue = [device newCommandQueue];
     int status = testIeee(device, queue, argv[1]);
     status |= testGlslCompute(device, queue, argv[2]);
     status |= testGlslFragment(device, queue, argv[3]);
+    status |= testGuard(device, queue, GuardStage::Fragment, argv[4]);
+    status |= testGuard(device, queue, GuardStage::Vertex, argv[5]);
+    status |= testGuard(device, queue, GuardStage::Compute, argv[6]);
     return status;
   }
 }

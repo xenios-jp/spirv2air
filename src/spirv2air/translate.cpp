@@ -240,6 +240,8 @@ class Translator {
   std::vector<Inst> insts_;
   std::vector<uint32_t> uses_;  // how many times each id is used as an operand
   std::unordered_map<uint32_t, std::pair<Value*, Value*>> mulOps_;  // contractable OpFMul results
+  std::unordered_map<uint32_t, uint32_t> absOf_;                    // FAbs result -> its operand
+  std::unordered_map<uint32_t, std::pair<uint32_t, uint32_t>> absMin_;  // NMin/FMin(FAbs x, FAbs y) -> (x, y)
   size_t functionBegin_ = 0, functionEnd_ = 0;
 
   Module m_;
@@ -373,6 +375,12 @@ bool isFloatBits(const Constant* c, float f) {
   std::memcpy(&bits, &f, 4);
   if (c->ck == Constant::Null) return bits == 0;
   return c->ck == Constant::FP && c->bits == bits;
+}
+
+// +0, -0 or null, or a composite of them.
+bool isFloatZero(const Constant* c) {
+  if (c->ck == Constant::Aggregate) return std::all_of(c->ops.begin(), c->ops.end(), isFloatZero);
+  return isFloatBits(c, 0.0f) || isFloatBits(c, -0.0f);
 }
 
 uint32_t Translator::constU32(uint32_t id) const {
@@ -2106,7 +2114,17 @@ void Translator::translate(const Inst& in) {
     case spv::OpSLessThan: icmp(I_SLT); break;
     case spv::OpULessThanEqual: icmp(I_ULE); break;
     case spv::OpSLessThanEqual: icmp(I_SLE); break;
-    case spv::OpFOrdEqual: fcmp(F_OEQ); break;
+    case spv::OpFOrdEqual:
+      // Xenia's zero-multiply guard, NMin(|x|, |y|) == 0, is x == 0 || y == 0 (NMin returns the other operand when
+      // one is NaN; FMin leaves that case undefined), and that compiles to less code than the minimum and its test.
+      if (auto it = absMin_.find(in.operand(2));
+          it != absMin_.end() && isConstant(in.operand(3)) && isFloatZero(consts_[in.operand(3)])) {
+        Value* zero = op(3);
+        set(b_->binop(Or, b_->fcmp(F_OEQ, val(it->second.first), zero), b_->fcmp(F_OEQ, val(it->second.second), zero)));
+        break;
+      }
+      fcmp(F_OEQ);
+      break;
     case spv::OpFOrdNotEqual: fcmp(F_ONE); break;
     case spv::OpFUnordNotEqual: fcmp(F_UNE); break;
     case spv::OpFOrdLessThan: fcmp(F_OLT); break;
@@ -2148,6 +2166,11 @@ void Translator::translate(const Inst& in) {
     case spv::OpExtInst:
       if (in.operand(2) != glslExt_) fail("extended instruction set");
       set(extInst(in));
+      if (in.w[4] == GLSLstd450FAbs) absOf_[res()] = in.w[5];
+      if (in.w[4] == GLSLstd450NMin || in.w[4] == GLSLstd450FMin) {
+        auto x = absOf_.find(in.w[5]), y = absOf_.find(in.w[6]);
+        if (x != absOf_.end() && y != absOf_.end()) absMin_[res()] = {x->second, y->second};
+      }
       break;
     case spv::OpSampledImage: {
       uint32_t image = type(in.operand(0)).elem;

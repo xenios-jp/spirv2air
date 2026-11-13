@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(spirv2air VERSION 1.0.4 LANGUAGES CXX)
+project(spirv2air VERSION 1.0.5 LANGUAGES CXX)
 if(NOT APPLE)
   message(FATAL_ERROR "This version requires the macOS SDK (CommonCrypto).")
 endif()
@@ -123,6 +123,9 @@ if(BUILD_TESTING AND SPIRV2AIR_BUILD_TESTS)
   assemble(mathieee math/ieee.frag.spvasm vulkan1.1)
   assemble(glslext_comp math/glsl_ext.comp.spvasm vulkan1.1)
   assemble(glslext_frag math/glsl_ext.frag.spvasm vulkan1.1)
+  assemble(guard_frag math/guard.frag.spvasm vulkan1.1)
+  assemble(guard_vert math/guard.vert.spvasm vulkan1.1)
+  assemble(guard_comp math/guard.comp.spvasm vulkan1.1)
   assemble(fetchstate fc/fetchstate.frag.spvasm vulkan1.1)
   assemble(tilecull tilecull/tilecull.vert.spvasm vulkan1.1)
   set(TEST_SPV ${ids_SPV} ${shared_SPV} ${atomics_SPV} ${fetch_SPV} ${bits_SPV} ${dispatch_SPV}
@@ -132,7 +135,7 @@ if(BUILD_TESTING AND SPIRV2AIR_BUILD_TESTS)
   add_custom_target(test_data ALL DEPENDS ${feedback_SPV} ${TEST_SPV} ${intnoflat_SPV} ${ieee_SPV} ${pack_SPV} ${strictmul_SPV} ${strictmul_none_SPV} ${integer_SPV} ${float_math_SPV} ${packing_SPV}
                                    ${glslext_comp_SPV} ${glslext_frag_SPV} ${atomic_extra_SPV} ${fetchstate_SPV} ${tilecull_SPV} ${barycentric_SPV} ${ordered_SPV} ${interpolate_SPV}
                                    ${rastercentroid_SPV}
-                                   ${tables_SPV} ${dropped_SPV})
+                                   ${tables_SPV} ${dropped_SPV} ${guard_frag_SPV} ${guard_vert_SPV} ${guard_comp_SPV})
   add_executable(cpu_tests tests/cpu_tests.cpp)
   target_link_libraries(cpu_tests PRIVATE spirv2air airkit)
   add_dependencies(cpu_tests test_data)
@@ -267,7 +270,8 @@ if(BUILD_TESTING AND SPIRV2AIR_BUILD_TESTS)
     set_tests_properties(ordered_gpu PROPERTIES SKIP_RETURN_CODE 77)
     add_test(NAME cull_gpu COMMAND cull_gpu ${cull_SPV})
     add_test(NAME dispatch_gpu COMMAND dispatch_gpu ${dispatch_SPV})
-    add_test(NAME math_gpu COMMAND math_gpu ${mathieee_SPV} ${glslext_comp_SPV} ${glslext_frag_SPV})
+    add_test(NAME math_gpu COMMAND math_gpu ${mathieee_SPV} ${glslext_comp_SPV} ${glslext_frag_SPV}
+      ${guard_frag_SPV} ${guard_vert_SPV} ${guard_comp_SPV})
     add_test(NAME fc_gpu COMMAND fc_gpu ${fetchstate_SPV})
     add_test(NAME tilecull_gpu COMMAND tilecull_gpu ${tilecull_SPV})
     add_test(NAME tex_gpu COMMAND tex_gpu ${layer2da_SPV} ${tex2d_SPV} ${cube_SPV} ${cubearray_SPV} ${tex3d_SPV}

@@ -1,0 +1,94 @@
+; Compute test shader for tests/math_gpu.mm (fast math off).
+; Xenia guards a product that must be 0 when an operand is 0 (D3D9: 0 * inf = 0) with g(x, y) = NMin(|x|, |y|) == 0 ?
+; 0 : x * y. spirv2air lowers the test NMin(|x|, |y|) == 0 as x == 0 || y == 0; the same test written 0 == NMin(...)
+; is not matched and keeps the minimum (the reference). With (a, b) the operands:
+;   result 0 = (g(a, b), g((a, b), (b, a)) as a vec2 against the zero (-0.0, +0.0), the scalar test as 1 or 0)
+;   result 1 = the same with every test written 0 == NMin(...)
+;   a, b = input floats 2i, 2i + 1 of thread i (binding 0); results 0 and 1 to output floats 8i .. 8i + 7 (binding 1).
+               OpCapability Shader
+          %glsl = OpExtInstImport "GLSL.std.450"
+               OpMemoryModel Logical GLSL450
+               OpEntryPoint GLCompute %main "main" %gid
+               OpExecutionMode %main LocalSize 64 1 1
+               OpDecorate %gid BuiltIn GlobalInvocationId
+               OpDecorate %arr ArrayStride 4
+               OpDecorate %arr4 ArrayStride 16
+               OpMemberDecorate %Buf 0 Offset 0
+               OpDecorate %Buf Block
+               OpMemberDecorate %Buf4 0 Offset 0
+               OpDecorate %Buf4 Block
+               OpDecorate %inb DescriptorSet 0
+               OpDecorate %inb Binding 0
+               OpDecorate %outb DescriptorSet 0
+               OpDecorate %outb Binding 1
+       %void = OpTypeVoid
+       %fnty = OpTypeFunction %void
+      %float = OpTypeFloat 32
+       %bool = OpTypeBool
+         %v2 = OpTypeVector %float 2
+         %b2 = OpTypeVector %bool 2
+         %v4 = OpTypeVector %float 4
+         %f0 = OpConstant %float 0
+        %fm0 = OpConstant %float -0.0
+         %f1 = OpConstant %float 1
+      %zero2 = OpConstantComposite %v2 %f0 %f0
+      %zeros = OpConstantComposite %v2 %fm0 %f0
+       %uint = OpTypeInt 32 0
+         %u3 = OpTypeVector %uint 3
+        %cu0 = OpConstant %uint 0
+        %cu1 = OpConstant %uint 1
+        %cu2 = OpConstant %uint 2
+        %arr = OpTypeRuntimeArray %float
+       %arr4 = OpTypeRuntimeArray %v4
+        %Buf = OpTypeStruct %arr
+       %Buf4 = OpTypeStruct %arr4
+         %pb = OpTypePointer StorageBuffer %Buf
+        %pb4 = OpTypePointer StorageBuffer %Buf4
+         %pf = OpTypePointer StorageBuffer %float
+        %pv4 = OpTypePointer StorageBuffer %v4
+         %pg = OpTypePointer Input %u3
+        %inb = OpVariable %pb StorageBuffer
+       %outb = OpVariable %pb4 StorageBuffer
+        %gid = OpVariable %pg Input
+       %main = OpFunction %void None %fnty
+      %entry = OpLabel
+         %g3 = OpLoad %u3 %gid
+          %i = OpCompositeExtract %uint %g3 0
+         %i2 = OpIMul %uint %i %cu2
+        %i2b = OpIAdd %uint %i2 %cu1
+         %pa = OpAccessChain %pf %inb %cu0 %i2
+         %pb_ = OpAccessChain %pf %inb %cu0 %i2b
+          %a = OpLoad %float %pa
+          %b = OpLoad %float %pb_
+       %prod = OpFMul %float %a %b
+         %aa = OpExtInst %float %glsl FAbs %a
+         %ab = OpExtInst %float %glsl FAbs %b
+          %m = OpExtInst %float %glsl NMin %aa %ab
+          %z = OpFOrdEqual %bool %m %f0
+         %zr = OpFOrdEqual %bool %f0 %m
+          %g = OpSelect %float %z %f0 %prod
+         %gr = OpSelect %float %zr %f0 %prod
+          %x = OpCompositeConstruct %v2 %a %b
+          %y = OpCompositeConstruct %v2 %b %a
+      %vprod = OpFMul %v2 %x %y
+         %ax = OpExtInst %v2 %glsl FAbs %x
+         %ay = OpExtInst %v2 %glsl FAbs %y
+         %vm = OpExtInst %v2 %glsl NMin %ax %ay
+         %vz = OpFOrdEqual %b2 %vm %zeros
+        %vzr = OpFOrdEqual %b2 %zeros %vm
+         %vg = OpSelect %v2 %vz %zero2 %vprod
+        %vgr = OpSelect %v2 %vzr %zero2 %vprod
+        %vg0 = OpCompositeExtract %float %vg 0
+        %vg1 = OpCompositeExtract %float %vg 1
+       %vgr0 = OpCompositeExtract %float %vgr 0
+       %vgr1 = OpCompositeExtract %float %vgr 1
+          %w = OpSelect %float %z %f1 %f0
+         %wr = OpSelect %float %zr %f1 %f0
+         %r0 = OpCompositeConstruct %v4 %g %vg0 %vg1 %w
+         %r1 = OpCompositeConstruct %v4 %gr %vgr0 %vgr1 %wr
+        %q0 = OpAccessChain %pv4 %outb %cu0 %i2
+        %q1 = OpAccessChain %pv4 %outb %cu0 %i2b
+               OpStore %q0 %r0
+               OpStore %q1 %r1
+               OpReturn
+               OpFunctionEnd

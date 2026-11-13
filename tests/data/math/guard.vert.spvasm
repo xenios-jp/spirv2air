@@ -1,0 +1,98 @@
+; Vertex test shader for tests/math_gpu.mm (fast math): one full-target triangle (vertex v at (-1 or 3, -1 or 3)).
+; Xenia guards a product that must be 0 when an operand is 0 (D3D9: 0 * inf = 0) with g(x, y) = NMin(|x|, |y|) == 0 ?
+; 0 : x * y. spirv2air lowers the test NMin(|x|, |y|) == 0 as x == 0 || y == 0; the same test written 0 == NMin(...)
+; is not matched and keeps the minimum (the reference). With (a, b) the operands:
+;   result 0 = (g(a, b), g((a, b), (b, a)) as a vec2 against the zero (-0.0, +0.0), the scalar test as 1 or 0)
+;   result 1 = the same with every test written 0 == NMin(...)
+;   a, b = the first two components of the vec4 in the uniform block at set 1 binding 0; results to the flat
+;   varyings at locations 0, 1.
+               OpCapability Shader
+          %glsl = OpExtInstImport "GLSL.std.450"
+               OpMemoryModel Logical GLSL450
+               OpEntryPoint Vertex %main "main" %vid %o0 %o1 %pv
+               OpDecorate %vid BuiltIn VertexIndex
+               OpDecorate %o0 Location 0
+               OpDecorate %o0 Flat
+               OpDecorate %o1 Location 1
+               OpDecorate %o1 Flat
+               OpMemberDecorate %PerVertex 0 BuiltIn Position
+               OpDecorate %PerVertex Block
+               OpMemberDecorate %Block 0 Offset 0
+               OpDecorate %Block Block
+               OpDecorate %ubo DescriptorSet 1
+               OpDecorate %ubo Binding 0
+       %void = OpTypeVoid
+       %fnty = OpTypeFunction %void
+      %float = OpTypeFloat 32
+       %bool = OpTypeBool
+         %v2 = OpTypeVector %float 2
+         %b2 = OpTypeVector %bool 2
+         %v4 = OpTypeVector %float 4
+         %f0 = OpConstant %float 0
+        %fm0 = OpConstant %float -0.0
+         %f1 = OpConstant %float 1
+      %zero2 = OpConstantComposite %v2 %f0 %f0
+      %zeros = OpConstantComposite %v2 %fm0 %f0
+        %int = OpTypeInt 32 1
+       %int0 = OpConstant %int 0
+       %int1 = OpConstant %int 1
+       %int2 = OpConstant %int 2
+        %fm1 = OpConstant %float -1
+         %f3 = OpConstant %float 3
+       %half = OpConstant %float 0.5
+      %Block = OpTypeStruct %v4
+  %PerVertex = OpTypeStruct %v4
+   %p_un_blk = OpTypePointer Uniform %Block
+    %p_un_v4 = OpTypePointer Uniform %v4
+   %p_out_v4 = OpTypePointer Output %v4
+   %p_out_pv = OpTypePointer Output %PerVertex
+    %p_in_i = OpTypePointer Input %int
+        %ubo = OpVariable %p_un_blk Uniform
+        %vid = OpVariable %p_in_i Input
+         %o0 = OpVariable %p_out_v4 Output
+         %o1 = OpVariable %p_out_v4 Output
+         %pv = OpVariable %p_out_pv Output
+       %main = OpFunction %void None %fnty
+      %entry = OpLabel
+          %v = OpLoad %int %vid
+         %is1 = OpIEqual %bool %v %int1
+         %is2 = OpIEqual %bool %v %int2
+         %px = OpSelect %float %is1 %f3 %fm1
+         %py = OpSelect %float %is2 %f3 %fm1
+        %pos = OpCompositeConstruct %v4 %px %py %half %f1
+       %posp = OpAccessChain %p_out_v4 %pv %int0
+               OpStore %posp %pos
+         %cp = OpAccessChain %p_un_v4 %ubo %int0
+          %c = OpLoad %v4 %cp
+          %a = OpCompositeExtract %float %c 0
+          %b = OpCompositeExtract %float %c 1
+       %prod = OpFMul %float %a %b
+         %aa = OpExtInst %float %glsl FAbs %a
+         %ab = OpExtInst %float %glsl FAbs %b
+          %m = OpExtInst %float %glsl NMin %aa %ab
+          %z = OpFOrdEqual %bool %m %f0
+         %zr = OpFOrdEqual %bool %f0 %m
+          %g = OpSelect %float %z %f0 %prod
+         %gr = OpSelect %float %zr %f0 %prod
+          %x = OpCompositeConstruct %v2 %a %b
+          %y = OpCompositeConstruct %v2 %b %a
+      %vprod = OpFMul %v2 %x %y
+         %ax = OpExtInst %v2 %glsl FAbs %x
+         %ay = OpExtInst %v2 %glsl FAbs %y
+         %vm = OpExtInst %v2 %glsl NMin %ax %ay
+         %vz = OpFOrdEqual %b2 %vm %zeros
+        %vzr = OpFOrdEqual %b2 %zeros %vm
+         %vg = OpSelect %v2 %vz %zero2 %vprod
+        %vgr = OpSelect %v2 %vzr %zero2 %vprod
+        %vg0 = OpCompositeExtract %float %vg 0
+        %vg1 = OpCompositeExtract %float %vg 1
+       %vgr0 = OpCompositeExtract %float %vgr 0
+       %vgr1 = OpCompositeExtract %float %vgr 1
+          %w = OpSelect %float %z %f1 %f0
+         %wr = OpSelect %float %zr %f1 %f0
+         %r0 = OpCompositeConstruct %v4 %g %vg0 %vg1 %w
+         %r1 = OpCompositeConstruct %v4 %gr %vgr0 %vgr1 %wr
+               OpStore %o0 %r0
+               OpStore %o1 %r1
+               OpReturn
+               OpFunctionEnd
