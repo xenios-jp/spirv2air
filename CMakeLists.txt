@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(spirv2air VERSION 1.0.7 LANGUAGES CXX)
+project(spirv2air VERSION 1.0.8 LANGUAGES CXX)
 if(NOT APPLE)
   message(FATAL_ERROR "This version requires the macOS SDK (CommonCrypto).")
 endif()
