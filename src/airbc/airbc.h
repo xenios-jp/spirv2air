@@ -469,8 +469,10 @@ public:
   Instruction *unreachable();
 
 private:
+  // `i` is new (Module::newInst), so its name is empty until set. Blocks are mostly short: start with room for a few.
   Instruction *add(Instruction *i, const std::string &name) {
-    i->name = name;
+    if (!name.empty()) i->name = name;
+    if (bb_->insts.capacity() == 0) bb_->insts.reserve(8);
     bb_->insts.push_back(i);
     return i;
   }
