@@ -278,10 +278,14 @@ class Cse {
   // transitively) is only used as the address of a load or a store, or as the base of such a GEP or bitcast.
   void findPrivate() {
     std::vector<char> escapes;
+    slotOf_.assign(n_, kNoSlot);
     for (const BasicBlock* b : f_->blocks)
       for (const Instruction* i : b->insts)
-        if (i->op == Op::Alloca) slotOf_.emplace(i, unsigned(escapes.size())), escapes.push_back(0);
-    if (escapes.empty()) return;
+        if (i->op == Op::Alloca) slotOf_[i->tag - ibase_] = unsigned(escapes.size()), escapes.push_back(0);
+    if (escapes.empty()) {
+      slotOf_.clear();
+      return;
+    }
     auto derives = [](const Instruction* i) {
       return i->op == Op::GEP || (i->op == Op::Cast && i->sub == BitCast);
     };
@@ -289,33 +293,30 @@ class Cse {
       changed = false;
       for (const BasicBlock* b : f_->blocks)
         for (const Instruction* i : b->insts)
-          if (derives(i) && !slotOf_.count(i))
-            if (auto it = slotOf_.find(i->ops[0]); it != slotOf_.end()) slotOf_.emplace(i, it->second), changed = true;
+          if (derives(i) && slotOf_[i->tag - ibase_] == kNoSlot)
+            if (unsigned s = slotOf(i->ops[0]); s != kNoSlot) slotOf_[i->tag - ibase_] = s, changed = true;
     }
     for (const BasicBlock* b : f_->blocks)
       for (const Instruction* i : b->insts)
         for (size_t k = 0; k < i->ops.size(); ++k) {
-          auto it = slotOf_.find(i->ops[k]);
-          if (it == slotOf_.end()) continue;
+          const unsigned s = slotOf(i->ops[k]);
+          if (s == kNoSlot) continue;
           const bool address = (i->op == Op::Load && k == 0) || (i->op == Op::Store && k == 1) || (derives(i) && k == 0);
-          if (!address) escapes[it->second] = 1;
+          if (!address) escapes[s] = 1;
         }
     // Number the tracked allocas densely; the others are dropped from the map.
     std::vector<unsigned> dense(escapes.size(), kNoSlot);
     for (size_t a = 0; a < escapes.size(); ++a)
       if (!escapes[a]) dense[a] = slots_++;
-    for (auto it = slotOf_.begin(); it != slotOf_.end();)
-      if (dense[it->second] == kNoSlot)
-        it = slotOf_.erase(it);
-      else
-        it->second = dense[it->second], ++it;
+    for (unsigned& s : slotOf_)
+      if (s != kNoSlot) s = dense[s];
     gen_.assign(slots_, 0);
     lastStore_.assign(slots_, kNoStore);
   }
 
   unsigned slotOf(const Value* ptr) const {
-    auto it = slotOf_.find(ptr);
-    return it == slotOf_.end() ? kNoSlot : it->second;
+    const unsigned k = ptr->tag - ibase_;
+    return ptr->vk == Value::Inst && k < slotOf_.size() ? slotOf_[k] : kNoSlot;
   }
 
   // Block c's private memory state on entry: its dominator-tree parent's at its end, or nothing known after a merge.
@@ -440,7 +441,7 @@ class Cse {
   const bool forwardPrivate_;
   // Private memory: tracked alloca number of each alloca and pointer derived from one; per tracked alloca its current
   // generation and, in the current block, the index in kept_ of its last store that no remaining load has read since.
-  std::unordered_map<const Value*, unsigned> slotOf_;
+  std::vector<unsigned> slotOf_;  // by instruction id (tag - ibase_); empty when nothing is tracked
   unsigned slots_ = 0;
   uint32_t nextGen_ = 0;
   std::vector<uint32_t> gen_, endGen_;  // endGen_: by block, each block's gen_ at its end
