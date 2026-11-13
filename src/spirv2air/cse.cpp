@@ -174,8 +174,8 @@ class Cse {
     visit(0);
     while (!stack.empty()) {
       auto& [b, mark, privateMark, k] = stack.back();
-      if (k < children_[b].size()) {
-        const int parent = b, c = children_[b][k++];
+      if (k < size_t(childAt_[b + 1] - childAt_[b])) {
+        const int parent = b, c = child_[size_t(childAt_[b]) + k++];
         stack.emplace_back(c, undo_.size(), privateUndo_.size(), 0);  // invalidates b and k
         enter(c, parent);
         visit(c);
@@ -378,12 +378,32 @@ class Cse {
   void buildTree() {
     const auto& blocks = f_->blocks;
     const size_t n = blocks.size();
-    std::vector<std::vector<int>> succ(n), pred(n);
-    for (size_t b = 0; b < n; ++b) {
-      if (blocks[b]->insts.empty()) continue;
+    // Edges, one per terminator operand, in compressed rows: block b's successors are succ[succAt[b] .. succAt[b + 1]) in
+    // operand order, its predecessors pred[predAt[b] .. predAt[b + 1]) in layout order.
+    auto edges = [&](size_t b) -> const decltype(Instruction::bbs)* {
+      if (blocks[b]->insts.empty()) return nullptr;
       const Instruction* t = blocks[b]->insts.back();
-      if (t->op != Op::Br && t->op != Op::Switch) continue;
-      for (BasicBlock* s : t->bbs) succ[b].push_back(int(s->tag - bbase_)), pred[s->tag - bbase_].push_back(int(b));
+      return t->op == Op::Br || t->op == Op::Switch ? &t->bbs : nullptr;
+    };
+    std::vector<int> succAt(n + 1, 0), predAt(n + 1, 0);
+    for (size_t b = 0; b < n; ++b)
+      if (const auto* e = edges(b)) {
+        succAt[b + 1] = int(e->size());
+        for (BasicBlock* s : *e) ++predAt[s->tag - bbase_ + 1];
+      }
+    for (size_t b = 0; b < n; ++b) succAt[b + 1] += succAt[b], predAt[b + 1] += predAt[b];
+    std::vector<int> succ(static_cast<size_t>(succAt[n])), pred(static_cast<size_t>(predAt[n]));
+    {
+      std::vector<int> fill(predAt.begin(), predAt.end() - 1);
+      for (size_t b = 0; b < n; ++b)
+        if (const auto* e = edges(b)) {
+          int k = succAt[b];
+          for (BasicBlock* s : *e) {
+            const int j = int(s->tag - bbase_);
+            succ[size_t(k++)] = j;
+            pred[size_t(fill[size_t(j)]++)] = int(b);
+          }
+        }
     }
     std::vector<int> post, po(n, -1);
     std::vector<char> seen(n, 0);
@@ -391,8 +411,8 @@ class Cse {
     seen[0] = 1;
     while (!stack.empty()) {
       auto& [b, k] = stack.back();
-      if (k < succ[b].size()) {
-        int s = succ[b][k++];
+      if (k < size_t(succAt[b + 1] - succAt[b])) {
+        int s = succ[size_t(succAt[b]) + k++];
         if (!seen[s]) seen[s] = 1, stack.push_back({s, 0});
       } else {
         po[b] = int(post.size());
@@ -408,7 +428,8 @@ class Cse {
       for (int b : rpo) {
         if (b == 0) continue;
         int d = -1;
-        for (int p : pred[b]) {
+        for (int e = predAt[b]; e < predAt[b + 1]; ++e) {
+          const int p = pred[size_t(e)];
           if (idom[p] < 0) continue;
           if (d < 0) {
             d = p;
@@ -425,13 +446,21 @@ class Cse {
     }
     if (slots_) {
       predCount_.assign(n, 0);
-      for (size_t b = 0; b < n; ++b) predCount_[b] = unsigned(pred[b].size());
+      for (size_t b = 0; b < n; ++b) predCount_[b] = unsigned(predAt[b + 1] - predAt[b]);
       endGen_.assign(n * slots_, 0);
     }
-    children_.assign(n, {});
-    // Function order, so the walk (and the output) does not depend on the traversal above.
+    // The dominator tree's children in compressed rows, in function order, so the walk (and the output) does not depend
+    // on the traversal above.
+    childAt_.assign(n + 1, 0);
     for (size_t b = 1; b < n; ++b)
-      if (idom[b] >= 0) children_[idom[b]].push_back(int(b));
+      if (idom[b] >= 0) ++childAt_[size_t(idom[b]) + 1];
+    for (size_t b = 0; b < n; ++b) childAt_[b + 1] += childAt_[b];
+    child_.resize(size_t(childAt_[n]));
+    {
+      std::vector<int> fill(childAt_.begin(), childAt_.end() - 1);
+      for (size_t b = 1; b < n; ++b)
+        if (idom[b] >= 0) child_[size_t(fill[size_t(idom[b])]++)] = int(b);
+    }
   }
 
   static constexpr unsigned kNoSlot = ~0u;
@@ -456,7 +485,7 @@ class Cse {
   std::vector<PrivateUndo> privateUndo_;
   CallAttrs calls_;
   bool deviceWritten_ = false, replaced_ = false;
-  std::vector<std::vector<int>> children_;
+  std::vector<int> childAt_, child_;  // the dominator tree: block b's children are child_[childAt_[b] .. childAt_[b + 1])
   Table table_;
   std::vector<size_t> undo_;  // the slots of the table's entries in insertion order, emptied when their block's
                               // subtree ends
