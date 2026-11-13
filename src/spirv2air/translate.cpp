@@ -296,6 +296,8 @@ class Translator {
   bool compute() const { return model_ == spv::ExecutionModelGLCompute; }
   uint32_t localSize_[3] = {1, 1, 1};
   uint32_t glslExt_ = kNone;
+  uint32_t spirv2airExt_ = kNone;  // NonSemantic.spirv2air (KeepBranch)
+  bool keepBranch_ = false;        // the current block holds KeepBranch; read by its conditional branch
 
   struct Output {
     Value* ptr;    // what to load at exit
@@ -456,8 +458,12 @@ void Translator::decode() {
         break;
       }
       case spv::OpExtInstImport:
-        if (std::strcmp(reinterpret_cast<const char*>(in.w + 2), "GLSL.std.450")) fail("extended instruction set");
-        glslExt_ = in.operand(0);
+        if (!std::strcmp(reinterpret_cast<const char*>(in.w + 2), kSpirv2airExtSet))
+          spirv2airExt_ = in.operand(0);
+        else if (!std::strcmp(reinterpret_cast<const char*>(in.w + 2), "GLSL.std.450"))
+          glslExt_ = in.operand(0);
+        else
+          fail("extended instruction set");
         break;
       case spv::OpEntryPoint: {
         if (entryId_ != kNone) fail("more than one entry point");
@@ -600,6 +606,7 @@ void Translator::decode() {
         break;
       }
       case spv::OpExtInst:  // modf and frexp with a pointer write the whole part through it
+        if (in.operand(2) != glslExt_) break;
         if (in.wc > 6 && (in.w[4] == GLSLstd450Modf || in.w[4] == GLSLstd450Frexp)) {
           uint32_t p = in.w[6];
           stored_[root[p] != kNone ? root[p] : p] = true;
@@ -1451,6 +1458,7 @@ void Translator::translateFunction() {
       case spv::OpLabel:
         if (firstLabel_ == kNone) firstLabel_ = in.operand(0);
         b_->setInsertBlock(block(in.operand(0)));
+        keepBranch_ = false;
         break;
       case spv::OpVariable: {
         const SType& pt = type(in.operand(0));
@@ -2185,6 +2193,15 @@ void Translator::translate(const Inst& in) {
 
     // ---- extended, images, atomics
     case spv::OpExtInst:
+      // KeepBranch: the conditional branch that ends this block stays a branch through simplifyCfg (kBrKeep).
+      // A caller asks for it where a value must reach the backend through its own block and a phi rather than a
+      // select. Apple's compiler appends the fixed-function blend to a fragment function, and how that blend's
+      // arithmetic is contracted and rounded follows the block structure the color output arrives through.
+      if (in.operand(2) == spirv2airExt_ && spirv2airExt_ != kNone) {
+        if (in.w[4] != kSpirv2airKeepBranch) fail("NonSemantic.spirv2air instruction " + std::to_string(in.w[4]));
+        keepBranch_ = true;
+        break;
+      }
       if (in.operand(2) != glslExt_) fail("extended instruction set");
       set(extInst(in));
       if (in.w[4] == GLSLstd450FAbs) slotFor(absOf_, res()) = in.w[5];
@@ -2300,7 +2317,11 @@ void Translator::translate(const Inst& in) {
       break;
     }
     case spv::OpBranch: b_->br(block(in.operand(0))); break;
-    case spv::OpBranchConditional: b_->condBr(op(0), block(in.operand(1)), block(in.operand(2))); break;
+    case spv::OpBranchConditional: {
+      Instruction* br = b_->condBr(op(0), block(in.operand(1)), block(in.operand(2)));
+      if (keepBranch_) br->flags |= kBrKeep;
+      break;
+    }
     case spv::OpSwitch: {
       Instruction* sw = b_->switch_(op(0), block(in.operand(1)));
       for (unsigned w = 3; w + 1 < in.wc; w += 2) Builder::addCase(sw, m_.constInt(i32_, in.w[w]), block(in.w[w + 1]));

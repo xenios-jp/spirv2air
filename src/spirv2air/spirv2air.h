@@ -17,6 +17,13 @@ namespace spirv2air {
 // for the same input. Bump it with every change that changes any output byte.
 inline constexpr char kVersion[] = "spirv2air 1.0.8";
 
+// Non-semantic extended instruction set read by spirv2air (SPV_KHR_non_semantic_info; other consumers ignore it).
+// KeepBranch (no operands; result type void) in a block makes the conditional branch ending that block reach the
+// output as a branch with its join's phis, where spirv2air would otherwise turn a small if into a select. Use it
+// where the backend must see the value arrive through its own block (see translate.cpp).
+inline constexpr char kSpirv2airExtSet[] = "NonSemantic.spirv2air";
+inline constexpr uint32_t kSpirv2airKeepBranch = 1;
+
 struct Result {
   std::vector<uint8_t> metallib;  // one function, "main"
   std::string error;              // empty on success

@@ -6,6 +6,8 @@
 //   B  if-conversion of triangles (H: br c, T, M; T: br M) and diamonds (H: br c, X, Y; X, Y: br M) whose arms are
 //      single-predecessor blocks of speculatable instructions: the arms' instructions move to the end of H, and a
 //      phi of M with entries for the arm(s) and H becomes a select on c in H. H then branches straight to M.
+//      Skipped when H's branch carries kBrKeep (the SPIR-V asked for the branch with KeepBranch; the backend
+//      needs the value to arrive through its own block).
 // Speculatable: an instruction without side effects that cannot trap or read memory (no loads, no integer division,
 // only calls that touch no memory). It then runs on paths where it did not before, but its value is used only through
 // the select that picks it when the original path ran, so nothing observable changes. Folding the main loop's `pc`
@@ -360,6 +362,7 @@ class Simplifier {
       if (removed.count(h)) continue;
       Instruction* br = h->insts.back();
       if (br->op != Op::Br || br->bbs.size() != 2 || br->bbs[0] == br->bbs[1]) continue;
+      if (br->flags & kBrKeep) continue;
       BasicBlock* x = br->bbs[0];
       BasicBlock* y = br->bbs[1];
       // The arms (null for a side that branches straight to the join) and the join.

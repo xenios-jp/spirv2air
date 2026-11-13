@@ -1,6 +1,8 @@
 // Control-flow simplification of the AIR spirv2air emits.
 #pragma once
 
+#include <cstdint>
+
 namespace airbc {
 class Module;
 struct Function;
@@ -14,6 +16,11 @@ struct SimplifyCfgStats {
   unsigned forwardedBlocks = 0;  // empty blocks (only a `br`) bypassed by retargeting their predecessors
   unsigned convertedArms = 0;    // single-predecessor arms of an if / if-else hoisted and joined by selects
 };
+
+// Instruction::flags of a conditional br whose SPIR-V block held KeepBranch (NonSemantic.spirv2air; the bitcode
+// writer does not write flags on a br). simplifyCfg keeps such a branch: its arms are not hoisted and its phis are
+// not made selects.
+inline constexpr uint8_t kBrKeep = 1;
 
 // Bypasses empty forwarding blocks, and turns small if / if-else shapes whose arms hold only side-effect-free,
 // non-trapping instructions into straight-line code: the arms' instructions move into the branching block (they

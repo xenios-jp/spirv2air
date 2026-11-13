@@ -1,0 +1,40 @@
+; An if whose arm is one pure instruction (FAbs), with KeepBranch (NonSemantic.spirv2air) in its header block:
+; spirv2air keeps the branch and the phi. tests/keepbranch_cpu.cpp also translates it without KeepBranch, where it
+; becomes a select whatever the selection control (DontFlatten here).
+               OpCapability Shader
+               OpExtension "SPV_KHR_non_semantic_info"
+       %glsl = OpExtInstImport "GLSL.std.450"
+         %ns = OpExtInstImport "NonSemantic.spirv2air"
+               OpMemoryModel Logical GLSL450
+               OpEntryPoint Fragment %main "main" %in %out
+               OpExecutionMode %main OriginUpperLeft
+               OpDecorate %in Location 0
+               OpDecorate %out Location 0
+       %void = OpTypeVoid
+         %fn = OpTypeFunction %void
+      %float = OpTypeFloat 32
+       %bool = OpTypeBool
+    %v4float = OpTypeVector %float 4
+     %ptr_in = OpTypePointer Input %v4float
+    %ptr_out = OpTypePointer Output %v4float
+         %in = OpVariable %ptr_in Input
+        %out = OpVariable %ptr_out Output
+       %half = OpConstant %float 0.5
+       %main = OpFunction %void None %fn
+      %entry = OpLabel
+          %v = OpLoad %v4float %in
+          %x = OpCompositeExtract %float %v 0
+          %y = OpCompositeExtract %float %v 1
+          %c = OpFOrdLessThan %bool %y %half
+       %keep = OpExtInst %void %ns 1
+               OpSelectionMerge %merge DontFlatten
+               OpBranchConditional %c %then %merge
+       %then = OpLabel
+          %a = OpExtInst %float %glsl FAbs %x
+               OpBranch %merge
+      %merge = OpLabel
+          %r = OpPhi %float %a %then %x %entry
+          %o = OpCompositeInsert %v4float %r %v 0
+               OpStore %out %o
+               OpReturn
+               OpFunctionEnd
