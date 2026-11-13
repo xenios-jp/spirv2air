@@ -3183,7 +3183,9 @@ std::vector<uint8_t> Translator::run() {
   scalarizeFunction(m_, main_);
   dump("scalarize");
   timer.lap(2);
-  cseFunction(m_, main_);
+  // Private memory forwarding only in vertex functions (vertex and tessellation evaluation): in pixel shaders it
+  // leaves Apple's compiled code and compile work as they were.
+  cseFunction(m_, main_, !compute() && model_ != spv::ExecutionModelFragment);
   dump("cse");
   timer.lap(3);
   simplifyInstructions(m_, main_);

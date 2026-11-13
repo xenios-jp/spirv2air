@@ -1,0 +1,148 @@
+; Vertex test shader for tests/forward_gpu.mm: private memory through the translator. A vec4 variable written whole and
+; then one component at a time (so it stays in memory) and a float[4] indexed with dynamic indices, stored and loaded
+; in both arms of a branch and in a loop. One full-target triangle (vertex v at (-1 or 3, -1 or 3)).
+; Uniform block at set 1 binding 0: (i, j, c, n) as uints, then (x, y, 0, 0) as floats.
+;   v = (x, y, x, x); a = {0, 0, 0, 0}; a[i] = x; a[j] = y;
+;   if (c != 0) v.z = a[i]; else v.w = a[j] + 1;
+;   for (k = 0; k < n; ++k) { v.x += 1; a[i] += v.y; }
+;   location 0 (flat) = v; location 1 (flat) = (a[0], a[1], a[2] + a[3], a[j])
+               OpCapability Shader
+               OpMemoryModel Logical GLSL450
+               OpEntryPoint Vertex %main "main" %vid %o0 %o1 %pv
+               OpDecorate %vid BuiltIn VertexIndex
+               OpDecorate %o0 Location 0
+               OpDecorate %o0 Flat
+               OpDecorate %o1 Location 1
+               OpDecorate %o1 Flat
+               OpMemberDecorate %PerVertex 0 BuiltIn Position
+               OpDecorate %PerVertex Block
+               OpMemberDecorate %Block 0 Offset 0
+               OpMemberDecorate %Block 1 Offset 16
+               OpDecorate %Block Block
+               OpDecorate %ubo DescriptorSet 1
+               OpDecorate %ubo Binding 0
+       %void = OpTypeVoid
+       %fnty = OpTypeFunction %void
+      %float = OpTypeFloat 32
+       %bool = OpTypeBool
+        %int = OpTypeInt 32 1
+       %uint = OpTypeInt 32 0
+         %v4 = OpTypeVector %float 4
+         %u4 = OpTypeVector %uint 4
+       %int0 = OpConstant %int 0
+       %int1 = OpConstant %int 1
+       %int2 = OpConstant %int 2
+      %uint0 = OpConstant %uint 0
+      %uint1 = OpConstant %uint 1
+      %uint2 = OpConstant %uint 2
+      %uint3 = OpConstant %uint 3
+      %uint4 = OpConstant %uint 4
+         %f1 = OpConstant %float 1
+        %fm1 = OpConstant %float -1
+         %f3 = OpConstant %float 3
+       %half = OpConstant %float 0.5
+       %arr4 = OpTypeArray %float %uint4
+      %zeros = OpConstantNull %arr4
+      %Block = OpTypeStruct %u4 %v4
+  %PerVertex = OpTypeStruct %v4
+   %p_un_blk = OpTypePointer Uniform %Block
+    %p_un_u4 = OpTypePointer Uniform %u4
+    %p_un_v4 = OpTypePointer Uniform %v4
+   %p_out_v4 = OpTypePointer Output %v4
+   %p_out_pv = OpTypePointer Output %PerVertex
+     %p_in_i = OpTypePointer Input %int
+     %pf_v4 = OpTypePointer Function %v4
+      %pf_f = OpTypePointer Function %float
+    %pf_arr = OpTypePointer Function %arr4
+        %ubo = OpVariable %p_un_blk Uniform
+        %vid = OpVariable %p_in_i Input
+         %o0 = OpVariable %p_out_v4 Output
+         %o1 = OpVariable %p_out_v4 Output
+         %pv = OpVariable %p_out_pv Output
+       %main = OpFunction %void None %fnty
+      %entry = OpLabel
+          %v = OpVariable %pf_v4 Function
+          %a = OpVariable %pf_arr Function
+        %vix = OpLoad %int %vid
+        %is1 = OpIEqual %bool %vix %int1
+        %is2 = OpIEqual %bool %vix %int2
+         %px = OpSelect %float %is1 %f3 %fm1
+         %py = OpSelect %float %is2 %f3 %fm1
+        %pos = OpCompositeConstruct %v4 %px %py %half %f1
+       %posp = OpAccessChain %p_out_v4 %pv %int0
+               OpStore %posp %pos
+         %up = OpAccessChain %p_un_u4 %ubo %int0
+          %u = OpLoad %u4 %up
+         %fp = OpAccessChain %p_un_v4 %ubo %int1
+          %f = OpLoad %v4 %fp
+          %i = OpCompositeExtract %uint %u 0
+          %j = OpCompositeExtract %uint %u 1
+          %c = OpCompositeExtract %uint %u 2
+          %n = OpCompositeExtract %uint %u 3
+          %x = OpCompositeExtract %float %f 0
+          %y = OpCompositeExtract %float %f 1
+       %xxxx = OpCompositeConstruct %v4 %x %x %x %x
+               OpStore %v %xxxx
+         %vy = OpAccessChain %pf_f %v %uint1
+               OpStore %vy %y
+               OpStore %a %zeros
+         %ai = OpAccessChain %pf_f %a %i
+               OpStore %ai %x
+         %aj = OpAccessChain %pf_f %a %j
+               OpStore %aj %y
+         %cb = OpINotEqual %bool %c %uint0
+               OpSelectionMerge %merge None
+               OpBranchConditional %cb %then %else
+       %then = OpLabel
+        %ai2 = OpAccessChain %pf_f %a %i
+          %t = OpLoad %float %ai2
+         %vz = OpAccessChain %pf_f %v %uint2
+               OpStore %vz %t
+               OpBranch %merge
+       %else = OpLabel
+        %aj2 = OpAccessChain %pf_f %a %j
+          %e = OpLoad %float %aj2
+         %e1 = OpFAdd %float %e %f1
+         %vw = OpAccessChain %pf_f %v %uint3
+               OpStore %vw %e1
+               OpBranch %merge
+      %merge = OpLabel
+               OpBranch %head
+       %head = OpLabel
+          %k = OpPhi %uint %uint0 %merge %k1 %cont
+         %lt = OpULessThan %bool %k %n
+               OpLoopMerge %exit %cont None
+               OpBranchConditional %lt %body %exit
+       %body = OpLabel
+         %vx = OpAccessChain %pf_f %v %uint0
+         %ox = OpLoad %float %vx
+         %nx = OpFAdd %float %ox %f1
+               OpStore %vx %nx
+        %vy2 = OpAccessChain %pf_f %v %uint1
+         %oy = OpLoad %float %vy2
+        %ai3 = OpAccessChain %pf_f %a %i
+         %oa = OpLoad %float %ai3
+         %na = OpFAdd %float %oa %oy
+               OpStore %ai3 %na
+               OpBranch %cont
+       %cont = OpLabel
+         %k1 = OpIAdd %uint %k %uint1
+               OpBranch %head
+       %exit = OpLabel
+         %vr = OpLoad %v4 %v
+               OpStore %o0 %vr
+        %pa0 = OpAccessChain %pf_f %a %uint0
+         %a0 = OpLoad %float %pa0
+        %pa1 = OpAccessChain %pf_f %a %uint1
+         %a1 = OpLoad %float %pa1
+        %pa2 = OpAccessChain %pf_f %a %uint2
+         %a2 = OpLoad %float %pa2
+        %pa3 = OpAccessChain %pf_f %a %uint3
+         %a3 = OpLoad %float %pa3
+        %a23 = OpFAdd %float %a2 %a3
+        %paj = OpAccessChain %pf_f %a %j
+         %aj3 = OpLoad %float %paj
+         %ar = OpCompositeConstruct %v4 %a0 %a1 %a23 %aj3
+               OpStore %o1 %ar
+               OpReturn
+               OpFunctionEnd
