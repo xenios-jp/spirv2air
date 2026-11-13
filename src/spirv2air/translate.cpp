@@ -3195,6 +3195,19 @@ std::vector<uint8_t> Translator::run() {
   buildEntry();
   translateFunction();
   buildExit();
+  // Baked fetch state fixes the conditions of whole texture paths. Fold what the constants decide right after the
+  // translator, before anything else works on the function: every stage after this one (promote, scalarize, cse, ...)
+  // pays for each instruction that is still there. Folding a condition removes the arm it rules out, which fixes the
+  // phis that join the arms and so the next condition, hence the rounds until neither pass finds anything. Without baked
+  // values (the generic conversion) there is little to decide and the rounds would only be cost.
+  if (!options_.graphics.functionConstantValues.empty()) {
+    for (bool again = true; again;) {
+      again = simplifyInstructions(m_, main_);
+      const CleanupStats removed = cleanupFunction(m_, main_);
+      again |= removed.unreachableBlocks || removed.foldedBranches || removed.mergedBlocks || removed.trivialPhis ||
+               removed.forwardedExtracts || removed.deadPhis || removed.deadInsts;
+    }
+  }
   timer.lap(0);
   dump("translate");
   promoteAllocas(m_, main_);
